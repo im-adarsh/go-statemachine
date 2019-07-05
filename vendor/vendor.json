@@ -1,0 +1,13 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "9hQcE6zcN+weJ4BLgL34hl3OyCw=",
+			"path": "github.com/looplab/fsm",
+			"revision": "84b5307469f859464403f80919467950a79de1b1",
+			"revisionTime": "2019-01-16T16:00:11Z"
+		}
+	],
+	"rootPath": "github.com/im-adarsh/go-statemachine"
+}
