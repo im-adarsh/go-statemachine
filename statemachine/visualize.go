@@ -6,10 +6,11 @@ const START_LINE_DIVIDER = "\n\n################################################
 const END_LINE_DIVIDER = "######################################################\n\n"
 
 func Visualize(sm StateMachine) {
-
 	if sm == nil {
 		fmt.Println("cannot visualize uninitialized statemachine")
+		return
 	}
+
 	_, trs := sm.GetTransitions()
 	if trs == nil {
 		fmt.Println("cannot visualize empty transitions")
