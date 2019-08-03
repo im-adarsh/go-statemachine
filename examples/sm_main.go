@@ -30,6 +30,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -39,6 +41,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -48,6 +52,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -57,6 +63,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	// visualize statemachine
@@ -74,6 +82,7 @@ func main() {
 		return
 	}
 	fmt.Println("after onMelt : ", pr.Status)
+	fmt.Println()
 
 	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onVapourise"}
 	err = sm.TriggerTransition(context.Background(), evtKey, pr)
@@ -83,6 +92,17 @@ func main() {
 	}
 
 	fmt.Println("after onVapourise : ", pr.Status)
+	fmt.Println()
+
+	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onUnknownEvent"}
+	err = sm.TriggerTransition(context.Background(), evtKey, pr)
+	if err != nil {
+		fmt.Println("error : ", err)
+		return
+	}
+
+	fmt.Println("after onVapourise : ", pr.Status)
+	fmt.Println()
 }
 
 func onBeforeEvent() statemachine.BeforeTransitionHandler {
@@ -102,6 +122,20 @@ func onEvent() statemachine.TransitionHandler {
 func onAfterEvent() statemachine.AfterTransitionHandler {
 	return func(context.Context, statemachine.TransitionModel) error {
 		fmt.Println("after")
+		return nil
+	}
+}
+
+func onSuccess() statemachine.OnSucessHandler {
+	return func(context.Context, statemachine.TransitionModel) error {
+		fmt.Println("success")
+		return nil
+	}
+}
+
+func onFailure() statemachine.OnFailureHandler {
+	return func(context.Context, statemachine.TransitionModel, statemachine.StateMachineError, error) error {
+		fmt.Println("failure")
 		return nil
 	}
 }
