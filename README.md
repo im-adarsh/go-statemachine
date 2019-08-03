@@ -1,5 +1,5 @@
 # go-statemachine
-
+######## Motivation : https://github.com/Tinder/StateMachine
 ```
 package main
 
