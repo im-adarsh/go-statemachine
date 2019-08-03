@@ -11,10 +11,28 @@ func Visualize(sm StateMachine) {
 		fmt.Println("cannot visualize uninitialized statemachine")
 	}
 	_, trs := sm.GetTransitions()
+	if trs == nil {
+		fmt.Println("cannot visualize empty transitions")
+	}
+
+	srcToDstsMap := map[State][]EventKey{}
+	for _, v := range trs {
+		if _, ok := srcToDstsMap[v.Src]; !ok {
+			srcToDstsMap[v.Src] = []EventKey{}
+		}
+
+		srcToDstsMap[v.Src] = append(srcToDstsMap[v.Src], EventKey{
+			Src:   v.Dst,
+			Event: v.Event,
+		})
+	}
 
 	fmt.Println(START_LINE_DIVIDER)
-	for _, v := range trs {
-		fmt.Println(fmt.Sprintf("%v -- %v --> %v", v.Src, v.Event, v.Dst))
+	for k, vs := range srcToDstsMap {
+		fmt.Println(fmt.Sprintf("| Node :  %v |", k))
+		for _, v := range vs {
+			fmt.Println(fmt.Sprintf("\t \t  -- %v --> | Node :  %v |", v.Event, v.Src))
+		}
 	}
 	fmt.Println(END_LINE_DIVIDER)
 
