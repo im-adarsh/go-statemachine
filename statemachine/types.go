@@ -19,6 +19,7 @@ type Event string
 
 type TransitionModel interface {
 	SetState(State)
+	GetState() State
 }
 
 type EventKey struct {
@@ -39,7 +40,7 @@ type Transition struct {
 
 type StateMachine interface {
 	AddTransition(Transition) error
-	TriggerTransition(context.Context, EventKey, TransitionModel) error
+	TriggerTransition(context.Context, Event, TransitionModel) error
 	GetTransitions() (EventKey, map[EventKey]Transition)
 }
 

@@ -32,9 +32,18 @@ func (s *stateMachine) AddTransition(t Transition) error {
 	return nil
 }
 
-func (s *stateMachine) TriggerTransition(ctx context.Context, e EventKey, t TransitionModel) error {
+func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t TransitionModel) error {
 
-	tr, ok := s.transitions[EventKey{Src: e.Src, Event: e.Event}]
+	if t == nil {
+		return errors.New("model is nil")
+	}
+
+	currentState := t.GetState()
+	if currentState == "" {
+		return errors.New("currentState is nil")
+	}
+
+	tr, ok := s.transitions[EventKey{Src: t.GetState(), Event: e}]
 	if !ok {
 		err := errors.New("transition is not defined")
 		if tr.OnFailure == nil {
@@ -43,9 +52,7 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e EventKey, t Tran
 		return tr.OnFailure(ctx, t, ERR_UNDEFINED_TRANSITION, err)
 	}
 
-	if t == nil {
-		return tr.OnFailure(ctx, t, ERR_NIL_MODEL, errors.New(""))
-	}
+	logTrigger(tr)
 
 	if tr.BeforeTransition != nil {
 		err := tr.BeforeTransition(ctx, t)

@@ -16,6 +16,10 @@ func (p *Purchase) SetState(s statemachine.State) {
 	p.Status = string(s)
 }
 
+func (p *Purchase) GetState() statemachine.State {
+	return statemachine.State(p.Status)
+}
+
 func main() {
 	sm := statemachine.NewStatemachine(statemachine.EventKey{
 		Src:   "SOLID",
@@ -24,14 +28,10 @@ func main() {
 
 	// initialize statemachine
 	sm.AddTransition(statemachine.Transition{
-		Src:              "SOLID",
-		Event:            "onMelt",
-		Dst:              "LIQUID",
-		BeforeTransition: onBeforeEvent(),
-		Transition:       onEvent(),
-		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
-		OnFailure:        onFailure(),
+		Src:        "SOLID",
+		Event:      "onMelt",
+		Dst:        "LIQUID",
+		Transition: onEvent(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -73,10 +73,10 @@ func main() {
 	// start to trigger the statemachine
 	pr := &Purchase{
 		PurchaseId: "p_123",
-		Status:     "",
+		Status:     "SOLID",
 	}
-	evtKey := statemachine.EventKey{Src: "SOLID", Event: "onMelt"}
-	err := sm.TriggerTransition(context.Background(), evtKey, pr)
+
+	err := sm.TriggerTransition(context.Background(), "onMelt", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -84,8 +84,7 @@ func main() {
 	fmt.Println("after onMelt : ", pr.Status)
 	fmt.Println()
 
-	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onVapourise"}
-	err = sm.TriggerTransition(context.Background(), evtKey, pr)
+	err = sm.TriggerTransition(context.Background(), "onVapourise", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -94,8 +93,7 @@ func main() {
 	fmt.Println("after onVapourise : ", pr.Status)
 	fmt.Println()
 
-	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onUnknownEvent"}
-	err = sm.TriggerTransition(context.Background(), evtKey, pr)
+	err = sm.TriggerTransition(context.Background(), "onUnknownEvent", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return

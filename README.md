@@ -19,6 +19,10 @@ func (p *Purchase) SetState(s statemachine.State) {
 	p.Status = string(s)
 }
 
+func (p *Purchase) GetState() statemachine.State {
+	return statemachine.State(p.Status)
+}
+
 func main() {
 	sm := statemachine.NewStatemachine(statemachine.EventKey{
 		Src:   "SOLID",
@@ -27,12 +31,10 @@ func main() {
 
 	// initialize statemachine
 	sm.AddTransition(statemachine.Transition{
-		Src:              "SOLID",
-		Event:            "onMelt",
-		Dst:              "LIQUID",
-		BeforeTransition: onBeforeEvent(),
-		Transition:       onEvent(),
-		AfterTransition:  onAfterEvent(),
+		Src:        "SOLID",
+		Event:      "onMelt",
+		Dst:        "LIQUID",
+		Transition: onEvent(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -42,6 +44,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -51,6 +55,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	sm.AddTransition(statemachine.Transition{
@@ -60,6 +66,8 @@ func main() {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
 	})
 
 	// visualize statemachine
@@ -68,24 +76,34 @@ func main() {
 	// start to trigger the statemachine
 	pr := &Purchase{
 		PurchaseId: "p_123",
-		Status:     "",
+		Status:     "SOLID",
 	}
-	evtKey := statemachine.EventKey{Src: "SOLID", Event: "onMelt"}
-	err := sm.TriggerTransition(context.Background(), evtKey, pr)
+
+	err := sm.TriggerTransition(context.Background(), "onMelt", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
 	}
 	fmt.Println("after onMelt : ", pr.Status)
+	fmt.Println()
 
-	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onVapourise"}
-	err = sm.TriggerTransition(context.Background(), evtKey, pr)
+	err = sm.TriggerTransition(context.Background(), "onVapourise", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
 	}
 
 	fmt.Println("after onVapourise : ", pr.Status)
+	fmt.Println()
+
+	err = sm.TriggerTransition(context.Background(), "onUnknownEvent", pr)
+	if err != nil {
+		fmt.Println("error : ", err)
+		return
+	}
+
+	fmt.Println("after onVapourise : ", pr.Status)
+	fmt.Println()
 }
 
 func onBeforeEvent() statemachine.BeforeTransitionHandler {
@@ -108,26 +126,47 @@ func onAfterEvent() statemachine.AfterTransitionHandler {
 		return nil
 	}
 }
+
+func onSuccess() statemachine.OnSucessHandler {
+	return func(context.Context, statemachine.TransitionModel) error {
+		fmt.Println("success")
+		return nil
+	}
+}
+
+func onFailure() statemachine.OnFailureHandler {
+	return func(context.Context, statemachine.TransitionModel, statemachine.StateMachineError, error) error {
+		fmt.Println("failure")
+		return nil
+	}
+}
+
 ```
 
 ## Output
 ```
 ######################################################
-SOLID -- onMelt --> LIQUID
-LIQUID -- onVapourise --> GAS
-GAS -- onCondensation --> LIQUID
-LIQUID -- onFreeze --> SOLID
+| Node :  GAS |
+                  -- onCondensation --> | Node :  LIQUID |
+| Node :  LIQUID |
+                  -- onFreeze --> | Node :  SOLID |
+                  -- onVapourise --> | Node :  GAS |
+| Node :  SOLID |
+                  -- onMelt --> | Node :  LIQUID |
 ######################################################
 
 
-before
+2019/08/03 23:17:49 [Current State : SOLID] -- onMelt --> [Destination State : LIQUID]
 during
-after
 after onMelt :  LIQUID
+
+2019/08/03 23:17:49 [Current State : LIQUID] -- onVapourise --> [Destination State : GAS]
 before
 during
 after
+success
 after onVapourise :  GAS
 
+error :  transition is not defined
 
 ```
