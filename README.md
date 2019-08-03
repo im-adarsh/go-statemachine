@@ -100,3 +100,19 @@ func onAfterEvent() statemachine.AfterTransitionHandler {
 	}
 }
 ```
+
+## Output
+```
+######################################################
+SOLID -- onMelt --> LIQUID
+LIQUID -- onVapourise --> GAS
+GAS -- onCondensation --> LIQUID
+LIQUID -- onFreeze --> SOLID
+######################################################
+
+
+before
+during
+after
+
+```
