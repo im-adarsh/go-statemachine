@@ -2,15 +2,15 @@ package main
 
 import (
 	"fmt"
+
 	fsm2 "github.com/looplab/fsm"
 )
 
-func main() {
+func main1() {
 	fsm := fsm2.NewFSM(
 		"green",
 		fsm2.Events{
 			{Name: "warn", Src: []string{"green"}, Dst: "yellow"},
-
 		},
 		fsm2.Callbacks{
 			"before_warn": func(e *fsm2.Event) {
@@ -39,6 +39,8 @@ func main() {
 			},
 		},
 	)
+
+	fmt.Println(fsm2.Visualize(fsm))
 	fmt.Println(fsm.Current())
 	err := fsm.Event("warn")
 	if err != nil {
