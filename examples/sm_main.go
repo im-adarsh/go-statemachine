@@ -76,6 +76,7 @@ func main() {
 		Status:     "SOLID",
 	}
 
+	// SOLID -> LIQUID
 	err := sm.TriggerTransition(context.Background(), "onMelt", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
@@ -84,6 +85,7 @@ func main() {
 	fmt.Println("after onMelt : ", pr.Status)
 	fmt.Println()
 
+	// LIQUID -> GAS
 	err = sm.TriggerTransition(context.Background(), "onVapourise", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
@@ -93,13 +95,14 @@ func main() {
 	fmt.Println("after onVapourise : ", pr.Status)
 	fmt.Println()
 
+	// GAS -> UNKNOWN (unregistered event)
 	err = sm.TriggerTransition(context.Background(), "onUnknownEvent", pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
 	}
 
-	fmt.Println("after onVapourise : ", pr.Status)
+	fmt.Println("after onUnknownEvent : ", pr.Status)
 	fmt.Println()
 }
 
