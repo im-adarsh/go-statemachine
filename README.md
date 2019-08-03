@@ -71,12 +71,21 @@ func main() {
 		Status:     "",
 	}
 	evtKey := statemachine.EventKey{Src: "SOLID", Event: "onMelt"}
-	pr1, err := sm.TriggerTransition(context.Background(), evtKey, pr)
+	err := sm.TriggerTransition(context.Background(), evtKey, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
+		return
+	}
+	fmt.Println("after onMelt : ", pr.Status)
+
+	evtKey = statemachine.EventKey{Src: "LIQUID", Event: "onVapourise"}
+	err = sm.TriggerTransition(context.Background(), evtKey, pr)
+	if err != nil {
+		fmt.Println("error : ", err)
+		return
 	}
 
-	fmt.Println(pr1)
+	fmt.Println("after onVapourise : ", pr.Status)
 }
 
 func onBeforeEvent() statemachine.BeforeTransitionHandler {
@@ -114,5 +123,11 @@ LIQUID -- onFreeze --> SOLID
 before
 during
 after
+after onMelt :  LIQUID
+before
+during
+after
+after onVapourise :  GAS
+
 
 ```

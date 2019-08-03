@@ -33,26 +33,26 @@ func (s *stateMachine) AddTransition(t Transition) error {
 	return nil
 }
 
-func (s *stateMachine) TriggerTransition(ctx context.Context, e EventKey, t TransitionModel) (*TransitionModel, error) {
+func (s *stateMachine) TriggerTransition(ctx context.Context, e EventKey, t TransitionModel) error {
 	tr, ok := s.transitions[EventKey{Src: e.Src, Event: e.Event}]
 	if !ok {
-		return &t, errors.New("transition is not found")
+		return errors.New("transition is not found")
 	}
 	err := tr.BeforeTransition(ctx, t)
 	if err != nil {
-		return &t, errors.New(fmt.Sprintf("before transition failed : %v", err))
+		return errors.New(fmt.Sprintf("before transition failed : %v", err))
 	}
 	err = tr.Transition(ctx, t)
 	if err != nil {
-		return &t, errors.New(fmt.Sprintf("transition failed : %v", err))
+		return errors.New(fmt.Sprintf("transition failed : %v", err))
 	}
 	t.SetState(tr.Dst)
 	err = tr.AfterTransition(ctx, t)
 	if err != nil {
-		return &t, errors.New(fmt.Sprintf("after transition failed : %v", err))
+		return errors.New(fmt.Sprintf("after transition failed : %v", err))
 	}
 
-	return &t, nil
+	return nil
 }
 
 func (s *stateMachine) GetTransitions() (EventKey, map[EventKey]Transition) {
