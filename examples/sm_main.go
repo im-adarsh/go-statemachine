@@ -21,51 +21,9 @@ func (p *Purchase) GetState() statemachine.State {
 }
 
 func main() {
-	sm := statemachine.NewStatemachine(statemachine.EventKey{
-		Src:   "SOLID",
-		Event: "onMelt",
-	})
 
-	// initialize statemachine
-	sm.AddTransition(statemachine.Transition{
-		Src:        "SOLID",
-		Event:      "onMelt",
-		Dst:        "LIQUID",
-		Transition: onEvent(),
-	})
-
-	sm.AddTransition(statemachine.Transition{
-		Src:              "LIQUID",
-		Event:            "onVapourise",
-		Dst:              "GAS",
-		BeforeTransition: onBeforeEvent(),
-		Transition:       onEvent(),
-		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
-		OnFailure:        onFailure(),
-	})
-
-	sm.AddTransition(statemachine.Transition{
-		Src:              "GAS",
-		Event:            "onCondensation",
-		Dst:              "LIQUID",
-		BeforeTransition: onBeforeEvent(),
-		Transition:       onEvent(),
-		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
-		OnFailure:        onFailure(),
-	})
-
-	sm.AddTransition(statemachine.Transition{
-		Src:              "LIQUID",
-		Event:            "onFreeze",
-		Dst:              "SOLID",
-		BeforeTransition: onBeforeEvent(),
-		Transition:       onEvent(),
-		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
-		OnFailure:        onFailure(),
-	})
+	// create statemachine
+	sm := createStatemachine()
 
 	// visualize statemachine
 	statemachine.Visualize(sm)
@@ -104,6 +62,52 @@ func main() {
 
 	fmt.Println("after onUnknownEvent : ", pr.Status)
 	fmt.Println()
+}
+
+// initialize statemachine
+func createStatemachine() statemachine.StateMachine {
+	sm := statemachine.NewStatemachine(statemachine.EventKey{
+		Src:   "SOLID",
+		Event: "onMelt",
+	})
+	// add state
+	sm.AddTransition(statemachine.Transition{
+		Src:        "SOLID",
+		Event:      "onMelt",
+		Dst:        "LIQUID",
+		Transition: onEvent(),
+	})
+	sm.AddTransition(statemachine.Transition{
+		Src:              "LIQUID",
+		Event:            "onVapourise",
+		Dst:              "GAS",
+		BeforeTransition: onBeforeEvent(),
+		Transition:       onEvent(),
+		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
+	})
+	sm.AddTransition(statemachine.Transition{
+		Src:              "GAS",
+		Event:            "onCondensation",
+		Dst:              "LIQUID",
+		BeforeTransition: onBeforeEvent(),
+		Transition:       onEvent(),
+		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
+	})
+	sm.AddTransition(statemachine.Transition{
+		Src:              "LIQUID",
+		Event:            "onFreeze",
+		Dst:              "SOLID",
+		BeforeTransition: onBeforeEvent(),
+		Transition:       onEvent(),
+		AfterTransition:  onAfterEvent(),
+		OnSucess:         onSuccess(),
+		OnFailure:        onFailure(),
+	})
+	return sm
 }
 
 func onBeforeEvent() statemachine.BeforeTransitionHandler {
