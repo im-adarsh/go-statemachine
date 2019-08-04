@@ -101,6 +101,22 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "testing LIQUID -> onMelt",
+			fields: fields{
+				startEvent:  ek,
+				transitions: trs,
+			},
+			args: args{
+				ctx: context.Background(),
+				e:   "onMelt",
+				t: &TestStruct{
+					Id:     "t_123",
+					Status: "LIQUID",
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
