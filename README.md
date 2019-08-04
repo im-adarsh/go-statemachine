@@ -1,5 +1,8 @@
 # go-statemachine
-######## Motivation : https://github.com/Tinder/StateMachine
+###### Motivation : https://github.com/Tinder/StateMachine
+
+![Image of Statemachine](static/activity-diagram.png)
+
 ```
 package main
 
