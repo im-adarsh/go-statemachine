@@ -2,6 +2,7 @@ package statemachine
 
 import (
 	"context"
+	"errors"
 )
 
 const (
@@ -12,6 +13,8 @@ const (
 	ERR_TRANSITION                             = "ERR_TRANSITION"
 	ERR_AFTER_TRANSITION                       = "ERR_AFTER_TRANSITION"
 )
+
+var ERR_IGNORE = errors.New("ERR_IGNORE")
 
 type StateMachineError string
 type State string

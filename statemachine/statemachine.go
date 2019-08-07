@@ -49,7 +49,10 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 		if tr.OnFailure == nil {
 			return err
 		}
-		return tr.OnFailure(ctx, t, ERR_UNDEFINED_TRANSITION, err)
+		err = tr.OnFailure(ctx, t, ERR_UNDEFINED_TRANSITION, err)
+		if err != ERR_IGNORE {
+			return err
+		}
 	}
 
 	logTrigger(tr)
@@ -60,7 +63,10 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			return tr.OnFailure(ctx, t, ERR_BEFORE_TRANSITION, err)
+			err = tr.OnFailure(ctx, t, ERR_BEFORE_TRANSITION, err)
+			if err != ERR_IGNORE {
+				return err
+			}
 		}
 	}
 
@@ -70,7 +76,10 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			return tr.OnFailure(ctx, t, ERR_TRANSITION, err)
+			err = tr.OnFailure(ctx, t, ERR_TRANSITION, err)
+			if err != ERR_IGNORE {
+				return err
+			}
 		}
 
 	}
@@ -83,7 +92,10 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			return tr.OnFailure(ctx, t, ERR_AFTER_TRANSITION, err)
+			err = tr.OnFailure(ctx, t, ERR_AFTER_TRANSITION, err)
+			if err != ERR_IGNORE {
+				return err
+			}
 		}
 	}
 
