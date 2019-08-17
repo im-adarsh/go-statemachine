@@ -2,8 +2,8 @@ package statemachine
 
 import "fmt"
 
-const START_LINE_DIVIDER = "\n\n######################################################"
-const END_LINE_DIVIDER = "######################################################\n\n"
+const StartLineDivider = "\n\n######################################################"
+const EndLineDivider = "######################################################\n\n"
 
 func Visualize(sm StateMachine) {
 	if sm == nil {
@@ -28,13 +28,13 @@ func Visualize(sm StateMachine) {
 		})
 	}
 
-	fmt.Println(START_LINE_DIVIDER)
+	fmt.Println(StartLineDivider)
 	for k, vs := range srcToDstsMap {
 		fmt.Println(fmt.Sprintf("| Node :  %v |", k))
 		for _, v := range vs {
 			fmt.Println(fmt.Sprintf("\t \t  -- %v --> | Node :  %v |", v.Event, v.Src))
 		}
 	}
-	fmt.Println(END_LINE_DIVIDER)
+	fmt.Print(EndLineDivider)
 
 }

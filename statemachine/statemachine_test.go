@@ -210,7 +210,7 @@ func onSuccess() OnSuccessHandler {
 }
 
 func onFailure() OnFailureHandler {
-	return func(ctx context.Context, t TransitionModel, s StateMachineError, err error) error {
+	return func(ctx context.Context, t TransitionModel, s Error, err error) error {
 		fmt.Println("failure : ", err)
 		return err
 	}

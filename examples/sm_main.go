@@ -139,7 +139,7 @@ func onSuccess() statemachine.OnSuccessHandler {
 }
 
 func onFailure() statemachine.OnFailureHandler {
-	return func(context.Context, statemachine.TransitionModel, statemachine.StateMachineError, error) error {
+	return func(context.Context, statemachine.TransitionModel, statemachine.Error, error) error {
 		fmt.Println("failure")
 		return nil
 	}

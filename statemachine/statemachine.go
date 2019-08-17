@@ -49,8 +49,8 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 		if tr.OnFailure == nil {
 			return err
 		}
-		err = tr.OnFailure(ctx, t, ERR_UNDEFINED_TRANSITION, err)
-		if err != ERR_IGNORE {
+		err = tr.OnFailure(ctx, t, ErrUndefinedTransition, err)
+		if err != ErrIgnore {
 			return err
 		}
 	}
@@ -63,8 +63,8 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			err = tr.OnFailure(ctx, t, ERR_BEFORE_TRANSITION, err)
-			if err != ERR_IGNORE {
+			err = tr.OnFailure(ctx, t, ErrBeforeTransition, err)
+			if err != ErrIgnore {
 				return err
 			}
 		}
@@ -76,8 +76,8 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			err = tr.OnFailure(ctx, t, ERR_TRANSITION, err)
-			if err != ERR_IGNORE {
+			err = tr.OnFailure(ctx, t, ErrTransition, err)
+			if err != ErrIgnore {
 				return err
 			}
 		}
@@ -92,8 +92,8 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 			if tr.OnFailure == nil {
 				return err
 			}
-			err = tr.OnFailure(ctx, t, ERR_AFTER_TRANSITION, err)
-			if err != ERR_IGNORE {
+			err = tr.OnFailure(ctx, t, ErrAfterTransition, err)
+			if err != ErrIgnore {
 				return err
 			}
 		}

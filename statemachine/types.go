@@ -6,17 +6,17 @@ import (
 )
 
 const (
-	ERR_UNINITIALIZED_SM     StateMachineError = "ERR_UNINITIALIZED_SM"
-	ERR_NIL_MODEL                              = "ERR_NIL_MODEL"
-	ERR_UNDEFINED_TRANSITION                   = "ERR_UNDEFINED_TRANSITION"
-	ERR_BEFORE_TRANSITION                      = "ERR_BEFORE_TRANSITION"
-	ERR_TRANSITION                             = "ERR_TRANSITION"
-	ERR_AFTER_TRANSITION                       = "ERR_AFTER_TRANSITION"
+	ErrUninitializedSm     Error = "ERR_UNINITIALIZED_SM"
+	ErrNilModel                  = "ERR_NIL_MODEL"
+	ErrUndefinedTransition       = "ERR_UNDEFINED_TRANSITION"
+	ErrBeforeTransition          = "ERR_BEFORE_TRANSITION"
+	ErrTransition                = "ERR_TRANSITION"
+	ErrAfterTransition           = "ERR_AFTER_TRANSITION"
 )
 
-var ERR_IGNORE = errors.New("ERR_IGNORE")
+var ErrIgnore = errors.New("ERR_IGNORE")
 
-type StateMachineError string
+type Error string
 type State string
 type Event string
 
@@ -48,7 +48,7 @@ type StateMachine interface {
 }
 
 type OnSuccessHandler func(context.Context, TransitionModel) error
-type OnFailureHandler func(context.Context, TransitionModel, StateMachineError, error) error
+type OnFailureHandler func(context.Context, TransitionModel, Error, error) error
 type TransitionHandler func(context.Context, TransitionModel) error
 type BeforeTransitionHandler func(context.Context, TransitionModel) error
 type AfterTransitionHandler func(context.Context, TransitionModel) error
