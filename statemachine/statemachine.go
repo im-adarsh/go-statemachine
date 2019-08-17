@@ -99,8 +99,8 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 		}
 	}
 
-	if tr.OnSucess != nil {
-		return tr.OnSucess(ctx, t)
+	if tr.OnSuccess != nil {
+		return tr.OnSuccess(ctx, t)
 	}
 
 	return nil

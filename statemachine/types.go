@@ -37,7 +37,7 @@ type Transition struct {
 	BeforeTransition BeforeTransitionHandler
 	Transition       TransitionHandler
 	AfterTransition  AfterTransitionHandler
-	OnSucess         OnSucessHandler
+	OnSuccess        OnSuccessHandler
 	OnFailure        OnFailureHandler
 }
 
@@ -47,7 +47,7 @@ type StateMachine interface {
 	GetTransitions() (EventKey, map[EventKey]Transition)
 }
 
-type OnSucessHandler func(context.Context, TransitionModel) error
+type OnSuccessHandler func(context.Context, TransitionModel) error
 type OnFailureHandler func(context.Context, TransitionModel, StateMachineError, error) error
 type TransitionHandler func(context.Context, TransitionModel) error
 type BeforeTransitionHandler func(context.Context, TransitionModel) error

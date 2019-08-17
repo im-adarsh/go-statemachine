@@ -152,7 +152,7 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 
@@ -163,7 +163,7 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 
@@ -174,7 +174,7 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 
@@ -202,7 +202,7 @@ func onAfterEvent() AfterTransitionHandler {
 	}
 }
 
-func onSuccess() OnSucessHandler {
+func onSuccess() OnSuccessHandler {
 	return func(context.Context, TransitionModel) error {
 		fmt.Println("success")
 		return nil

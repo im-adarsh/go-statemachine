@@ -84,7 +84,7 @@ func createStatemachine() statemachine.StateMachine {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	sm.AddTransition(statemachine.Transition{
@@ -94,7 +94,7 @@ func createStatemachine() statemachine.StateMachine {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	sm.AddTransition(statemachine.Transition{
@@ -104,7 +104,7 @@ func createStatemachine() statemachine.StateMachine {
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	return sm
@@ -131,7 +131,7 @@ func onAfterEvent() statemachine.AfterTransitionHandler {
 	}
 }
 
-func onSuccess() statemachine.OnSucessHandler {
+func onSuccess() statemachine.OnSuccessHandler {
 	return func(context.Context, statemachine.TransitionModel) error {
 		fmt.Println("success")
 		return nil
