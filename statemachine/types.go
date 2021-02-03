@@ -47,12 +47,12 @@ type Transition struct {
 
 type StateMachine interface {
 	AddTransition(Transition) error
-	TriggerTransition(context.Context, TransitionEvent, TransitionModel) error
+	TriggerTransition(context.Context, TransitionEvent, TransitionModel) (TransitionModel, error)
 	GetTransitions() (EventKey, map[EventKey]Transition)
 }
 
-type OnSuccessHandler func(context.Context, TransitionModel) error
-type OnFailureHandler func(context.Context, TransitionModel, Error, error) error
-type TransitionHandler func(context.Context, TransitionEvent, TransitionModel) error
-type BeforeTransitionHandler func(context.Context, TransitionModel) error
-type AfterTransitionHandler func(context.Context, TransitionModel) error
+type OnSuccessHandler func(context.Context, TransitionModel) (TransitionModel, error)
+type OnFailureHandler func(context.Context, TransitionModel, Error, error) (TransitionModel, error)
+type TransitionHandler func(context.Context, TransitionEvent, TransitionModel) (TransitionModel, error)
+type BeforeTransitionHandler func(context.Context, TransitionModel) (TransitionModel, error)
+type AfterTransitionHandler func(context.Context, TransitionModel) (TransitionModel, error)

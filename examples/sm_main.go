@@ -56,7 +56,7 @@ func main() {
 	}
 
 	// SOLID -> LIQUID
-	err := sm.TriggerTransition(context.Background(), &onMelt{}, pr)
+	_, err := sm.TriggerTransition(context.Background(), &onMelt{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -65,7 +65,7 @@ func main() {
 	fmt.Println()
 
 	// LIQUID -> GAS
-	err = sm.TriggerTransition(context.Background(), &onVapourise{}, pr)
+	_, err = sm.TriggerTransition(context.Background(), &onVapourise{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -75,7 +75,7 @@ func main() {
 	fmt.Println()
 
 	// GAS -> UNKNOWN (unregistered event)
-	err = sm.TriggerTransition(context.Background(), &onUnknownEvent{}, pr)
+	_, err = sm.TriggerTransition(context.Background(), &onUnknownEvent{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -132,36 +132,36 @@ func createStatemachine() statemachine.StateMachine {
 }
 
 func onBeforeEvent() statemachine.BeforeTransitionHandler {
-	return func(context.Context, statemachine.TransitionModel) error {
+	return func(context.Context, statemachine.TransitionModel) (statemachine.TransitionModel, error) {
 		fmt.Println("before")
-		return nil
+		return nil, nil
 	}
 }
 
 func onEvent() statemachine.TransitionHandler {
-	return func(context.Context, statemachine.TransitionEvent, statemachine.TransitionModel) error {
+	return func(context.Context, statemachine.TransitionEvent, statemachine.TransitionModel) (statemachine.TransitionModel, error) {
 		fmt.Println("during")
-		return nil
+		return nil, nil
 	}
 }
 
 func onAfterEvent() statemachine.AfterTransitionHandler {
-	return func(context.Context, statemachine.TransitionModel) error {
+	return func(context.Context, statemachine.TransitionModel) (statemachine.TransitionModel, error) {
 		fmt.Println("after")
-		return nil
+		return nil, nil
 	}
 }
 
 func onSuccess() statemachine.OnSuccessHandler {
-	return func(context.Context, statemachine.TransitionModel) error {
+	return func(context.Context, statemachine.TransitionModel) (statemachine.TransitionModel, error) {
 		fmt.Println("success")
-		return nil
+		return nil, nil
 	}
 }
 
 func onFailure() statemachine.OnFailureHandler {
-	return func(context.Context, statemachine.TransitionModel, statemachine.Error, error) error {
+	return func(context.Context, statemachine.TransitionModel, statemachine.Error, error) (statemachine.TransitionModel, error) {
 		fmt.Println("failure")
-		return nil
+		return nil, nil
 	}
 }

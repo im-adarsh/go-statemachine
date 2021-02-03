@@ -152,7 +152,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 				startEvent:  tt.fields.startEvent,
 				transitions: tt.fields.transitions,
 			}
-			if err := s.TriggerTransition(tt.args.ctx, tt.args.e, tt.args.t); (err != nil) != tt.wantErr {
+			if _, err := s.TriggerTransition(tt.args.ctx, tt.args.e, tt.args.t); (err != nil) != tt.wantErr {
 				t.Errorf("TriggerTransition() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -210,36 +210,36 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 }
 
 func onBeforeEvent() BeforeTransitionHandler {
-	return func(context.Context, TransitionModel) error {
+	return func(context.Context, TransitionModel) (TransitionModel, error) {
 		fmt.Println("before")
-		return nil
+		return nil, nil
 	}
 }
 
 func onEvent() TransitionHandler {
-	return func(context.Context, TransitionEvent, TransitionModel) error {
+	return func(context.Context, TransitionEvent, TransitionModel) (TransitionModel, error) {
 		fmt.Println("during")
-		return nil
+		return nil, nil
 	}
 }
 
 func onAfterEvent() AfterTransitionHandler {
-	return func(context.Context, TransitionModel) error {
+	return func(context.Context, TransitionModel) (TransitionModel, error) {
 		fmt.Println("after")
-		return nil
+		return nil, nil
 	}
 }
 
 func onSuccess() OnSuccessHandler {
-	return func(context.Context, TransitionModel) error {
+	return func(context.Context, TransitionModel) (TransitionModel, error) {
 		fmt.Println("success")
-		return nil
+		return nil, nil
 	}
 }
 
 func onFailure() OnFailureHandler {
-	return func(ctx context.Context, t TransitionModel, s Error, err error) error {
+	return func(ctx context.Context, t TransitionModel, s Error, err error) (TransitionModel, error) {
 		fmt.Println("failure : ", err)
-		return err
+		return nil, err
 	}
 }

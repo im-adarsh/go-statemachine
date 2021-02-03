@@ -34,48 +34,48 @@ func (s *stateMachine) AddTransition(t Transition) error {
 	return nil
 }
 
-func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent, t TransitionModel) error {
+func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent, t TransitionModel) (TransitionModel, error) {
 
 	if t == nil {
-		return errors.New("model is nil")
+		return nil, errors.New("model is nil")
 	}
 
 	tr, ok := s.transitions[EventKey{Src: t.GetState(), Event: e.GetEvent()}]
 	if !ok {
 		err := errors.New("transition is not defined")
 		if tr.OnFailure == nil {
-			return err
+			return nil, err
 		}
-		err = tr.OnFailure(ctx, t, ErrUndefinedTransition, err)
+		t, err = tr.OnFailure(ctx, t, ErrUndefinedTransition, err)
 		if err != ErrIgnore {
-			return err
+			return nil, err
 		}
 	}
 
 	logTrigger(tr)
 
 	if tr.BeforeTransition != nil {
-		err := tr.BeforeTransition(ctx, t)
+		t, err := tr.BeforeTransition(ctx, t)
 		if err != nil {
 			if tr.OnFailure == nil {
-				return err
+				return nil, err
 			}
-			err = tr.OnFailure(ctx, t, ErrBeforeTransition, err)
+			t, err = tr.OnFailure(ctx, t, ErrBeforeTransition, err)
 			if err != ErrIgnore {
-				return err
+				return nil, err
 			}
 		}
 	}
 
 	if tr.Transition != nil {
-		err := tr.Transition(ctx, e, t)
+		t, err := tr.Transition(ctx, e, t)
 		if err != nil {
 			if tr.OnFailure == nil {
-				return err
+				return nil, err
 			}
-			err = tr.OnFailure(ctx, t, ErrTransition, err)
+			t, err = tr.OnFailure(ctx, t, ErrTransition, err)
 			if err != ErrIgnore {
-				return err
+				return nil, err
 			}
 		}
 
@@ -84,14 +84,14 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent,
 	t.SetState(tr.Dst)
 
 	if tr.AfterTransition != nil {
-		err := tr.AfterTransition(ctx, t)
+		t, err := tr.AfterTransition(ctx, t)
 		if err != nil {
 			if tr.OnFailure == nil {
-				return err
+				return nil, err
 			}
-			err = tr.OnFailure(ctx, t, ErrAfterTransition, err)
+			t, err = tr.OnFailure(ctx, t, ErrAfterTransition, err)
 			if err != ErrIgnore {
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -100,7 +100,7 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent,
 		return tr.OnSuccess(ctx, t)
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (s *stateMachine) GetTransitions() (EventKey, map[EventKey]Transition) {
