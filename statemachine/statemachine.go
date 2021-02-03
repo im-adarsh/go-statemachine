@@ -100,7 +100,7 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent,
 		return tr.OnSuccess(ctx, t)
 	}
 
-	return nil, nil
+	return t, nil
 }
 
 func (s *stateMachine) GetTransitions() (EventKey, map[EventKey]Transition) {
