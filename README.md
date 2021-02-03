@@ -4,7 +4,6 @@
 ![Image of Statemachine](static/activity-diagram.png)
 
 ```
-
 package main
 
 import (
@@ -27,6 +26,27 @@ func (p *Purchase) GetState() statemachine.State {
 	return statemachine.State(p.Status)
 }
 
+type onMelt struct {
+}
+
+func (receiver *onMelt) GetEvent() statemachine.Event {
+	return "onMelt"
+}
+
+type onVapourise struct {
+}
+
+func (receiver *onVapourise) GetEvent() statemachine.Event {
+	return "onVapourise"
+}
+
+type onUnknownEvent struct {
+}
+
+func (receiver *onUnknownEvent) GetEvent() statemachine.Event {
+	return "onUnknownEvent"
+}
+
 func main() {
 
 	// create statemachine
@@ -42,7 +62,7 @@ func main() {
 	}
 
 	// SOLID -> LIQUID
-	err := sm.TriggerTransition(context.Background(), "onMelt", pr)
+	err := sm.TriggerTransition(context.Background(), &onMelt{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -51,7 +71,7 @@ func main() {
 	fmt.Println()
 
 	// LIQUID -> GAS
-	err = sm.TriggerTransition(context.Background(), "onVapourise", pr)
+	err = sm.TriggerTransition(context.Background(), &onVapourise{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -61,7 +81,7 @@ func main() {
 	fmt.Println()
 
 	// GAS -> UNKNOWN (unregistered event)
-	err = sm.TriggerTransition(context.Background(), "onUnknownEvent", pr)
+	err = sm.TriggerTransition(context.Background(), &onUnknownEvent{}, pr)
 	if err != nil {
 		fmt.Println("error : ", err)
 		return
@@ -79,39 +99,39 @@ func createStatemachine() statemachine.StateMachine {
 	})
 	// add state
 	sm.AddTransition(statemachine.Transition{
-		Src:        "SOLID",
+		Src:        []statemachine.State{"SOLID"},
 		Event:      "onMelt",
 		Dst:        "LIQUID",
 		Transition: onEvent(),
 	})
 	sm.AddTransition(statemachine.Transition{
-		Src:              "LIQUID",
+		Src:              []statemachine.State{"LIQUID"},
 		Event:            "onVapourise",
 		Dst:              "GAS",
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	sm.AddTransition(statemachine.Transition{
-		Src:              "GAS",
+		Src:              []statemachine.State{"GAS"},
 		Event:            "onCondensation",
 		Dst:              "LIQUID",
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	sm.AddTransition(statemachine.Transition{
-		Src:              "LIQUID",
+		Src:              []statemachine.State{"LIQUID"},
 		Event:            "onFreeze",
 		Dst:              "SOLID",
 		BeforeTransition: onBeforeEvent(),
 		Transition:       onEvent(),
 		AfterTransition:  onAfterEvent(),
-		OnSucess:         onSuccess(),
+		OnSuccess:        onSuccess(),
 		OnFailure:        onFailure(),
 	})
 	return sm
@@ -138,7 +158,7 @@ func onAfterEvent() statemachine.AfterTransitionHandler {
 	}
 }
 
-func onSuccess() statemachine.OnSucessHandler {
+func onSuccess() statemachine.OnSuccessHandler {
 	return func(context.Context, statemachine.TransitionModel) error {
 		fmt.Println("success")
 		return nil
@@ -146,12 +166,11 @@ func onSuccess() statemachine.OnSucessHandler {
 }
 
 func onFailure() statemachine.OnFailureHandler {
-	return func(context.Context, statemachine.TransitionModel, statemachine.StateMachineError, error) error {
+	return func(context.Context, statemachine.TransitionModel, statemachine.Error, error) error {
 		fmt.Println("failure")
 		return nil
 	}
 }
-
 
 ```
 

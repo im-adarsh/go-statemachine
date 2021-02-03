@@ -19,6 +19,34 @@ func (p *TestStruct) GetState() State {
 	return State(p.Status)
 }
 
+type onMelt struct {
+}
+
+func (receiver *onMelt) GetEvent() Event {
+	return "onMelt"
+}
+
+type onVapourise struct {
+}
+
+func (receiver *onVapourise) GetEvent() Event {
+	return "onVapourise"
+}
+
+type onCondensation struct {
+}
+
+func (receiver *onCondensation) GetEvent() Event {
+	return "onCondensation"
+}
+
+type onFreeze struct {
+}
+
+func (receiver *onFreeze) GetEvent() Event {
+	return "onFreeze"
+}
+
 func Test_stateMachine_TriggerTransition(t *testing.T) {
 	type fields struct {
 		startEvent  EventKey
@@ -26,7 +54,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 	}
 	type args struct {
 		ctx context.Context
-		e   Event
+		e   TransitionEvent
 		t   TransitionModel
 	}
 
@@ -45,7 +73,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				e:   "onMelt",
+				e:   &onMelt{},
 				t: &TestStruct{
 					Id:     "t_123",
 					Status: "SOLID",
@@ -61,7 +89,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				e:   "onVapourise",
+				e:   &onVapourise{},
 				t: &TestStruct{
 					Id:     "t_123",
 					Status: "LIQUID",
@@ -77,7 +105,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				e:   "onCondensation",
+				e:   &onCondensation{},
 				t: &TestStruct{
 					Id:     "t_123",
 					Status: "GAS",
@@ -93,7 +121,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				e:   "onFreeze",
+				e:   &onFreeze{},
 				t: &TestStruct{
 					Id:     "t_123",
 					Status: "LIQUID",
@@ -109,7 +137,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				e:   "onMelt",
+				e:   &onMelt{},
 				t: &TestStruct{
 					Id:     "t_123",
 					Status: "LIQUID",
@@ -139,14 +167,14 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 
 	// initialize statemachine
 	sm.AddTransition(Transition{
-		Src:        "SOLID",
+		Src:        []State{"SOLID"},
 		Event:      "onMelt",
 		Dst:        "LIQUID",
 		Transition: onEvent(),
 	})
 
 	sm.AddTransition(Transition{
-		Src:              "LIQUID",
+		Src:              []State{"LIQUID"},
 		Event:            "onVapourise",
 		Dst:              "GAS",
 		BeforeTransition: onBeforeEvent(),
@@ -157,7 +185,7 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 	})
 
 	sm.AddTransition(Transition{
-		Src:              "GAS",
+		Src:              []State{"GAS"},
 		Event:            "onCondensation",
 		Dst:              "LIQUID",
 		BeforeTransition: onBeforeEvent(),
@@ -168,7 +196,7 @@ func getTestData() (EventKey, map[EventKey]Transition) {
 	})
 
 	sm.AddTransition(Transition{
-		Src:              "LIQUID",
+		Src:              []State{"LIQUID"},
 		Event:            "onFreeze",
 		Dst:              "SOLID",
 		BeforeTransition: onBeforeEvent(),
