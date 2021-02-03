@@ -73,7 +73,7 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent,
 	}
 
 	if tr.Transition != nil {
-		err := tr.Transition(ctx, t)
+		err := tr.Transition(ctx, e, t)
 		if err != nil {
 			if tr.OnFailure == nil {
 				return err

@@ -53,6 +53,6 @@ type StateMachine interface {
 
 type OnSuccessHandler func(context.Context, TransitionModel) error
 type OnFailureHandler func(context.Context, TransitionModel, Error, error) error
-type TransitionHandler func(context.Context, TransitionModel) error
+type TransitionHandler func(context.Context, TransitionEvent, TransitionModel) error
 type BeforeTransitionHandler func(context.Context, TransitionModel) error
 type AfterTransitionHandler func(context.Context, TransitionModel) error

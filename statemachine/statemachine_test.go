@@ -217,7 +217,7 @@ func onBeforeEvent() BeforeTransitionHandler {
 }
 
 func onEvent() TransitionHandler {
-	return func(context.Context, TransitionModel) error {
+	return func(context.Context, TransitionEvent, TransitionModel) error {
 		fmt.Println("during")
 		return nil
 	}

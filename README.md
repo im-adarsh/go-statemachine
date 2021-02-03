@@ -145,7 +145,7 @@ func onBeforeEvent() statemachine.BeforeTransitionHandler {
 }
 
 func onEvent() statemachine.TransitionHandler {
-	return func(context.Context, statemachine.TransitionModel) error {
+	return func(context.Context, statemachine.TransitionEvent, statemachine.TransitionModel) error {
 		fmt.Println("during")
 		return nil
 	}
@@ -171,6 +171,7 @@ func onFailure() statemachine.OnFailureHandler {
 		return nil
 	}
 }
+
 
 ```
 
