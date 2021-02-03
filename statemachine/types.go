@@ -25,13 +25,17 @@ type TransitionModel interface {
 	GetState() State
 }
 
+type TransitionEvent interface {
+	GetEvent() Event
+}
+
 type EventKey struct {
 	Src   State
 	Event Event
 }
 
 type Transition struct {
-	Src              State
+	Src              []State
 	Event            Event
 	Dst              State
 	BeforeTransition BeforeTransitionHandler
@@ -43,7 +47,7 @@ type Transition struct {
 
 type StateMachine interface {
 	AddTransition(Transition) error
-	TriggerTransition(context.Context, Event, TransitionModel) error
+	TriggerTransition(context.Context, TransitionEvent, TransitionModel) error
 	GetTransitions() (EventKey, map[EventKey]Transition)
 }
 

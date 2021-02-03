@@ -24,15 +24,17 @@ func (s *stateMachine) AddTransition(t Transition) error {
 		return errors.New("transition is not added")
 	}
 
-	if _, ok := s.transitions[EventKey{Src: t.Src, Event: t.Event}]; ok {
-		return errors.New("transition is already present")
-	}
+	for _, src := range t.Src {
+		if _, ok := s.transitions[EventKey{Src: src, Event: t.Event}]; ok {
+			return errors.New("transition is already present")
+		}
 
-	s.transitions[EventKey{Src: t.Src, Event: t.Event}] = t
+		s.transitions[EventKey{Src: src, Event: t.Event}] = t
+	}
 	return nil
 }
 
-func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t TransitionModel) error {
+func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent, t TransitionModel) error {
 
 	if t == nil {
 		return errors.New("model is nil")
@@ -43,7 +45,7 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e Event, t Transit
 		return errors.New("currentState is nil")
 	}
 
-	tr, ok := s.transitions[EventKey{Src: t.GetState(), Event: e}]
+	tr, ok := s.transitions[EventKey{Src: t.GetState(), Event: e.GetEvent()}]
 	if !ok {
 		err := errors.New("transition is not defined")
 		if tr.OnFailure == nil {

@@ -18,14 +18,16 @@ func Visualize(sm StateMachine) {
 
 	srcToDstsMap := map[State][]EventKey{}
 	for _, v := range trs {
-		if _, ok := srcToDstsMap[v.Src]; !ok {
-			srcToDstsMap[v.Src] = []EventKey{}
-		}
+		for _, src := range v.Src {
+			if _, ok := srcToDstsMap[src]; !ok {
+				srcToDstsMap[src] = []EventKey{}
+			}
 
-		srcToDstsMap[v.Src] = append(srcToDstsMap[v.Src], EventKey{
-			Src:   v.Dst,
-			Event: v.Event,
-		})
+			srcToDstsMap[src] = append(srcToDstsMap[src], EventKey{
+				Src:   v.Dst,
+				Event: v.Event,
+			})
+		}
 	}
 
 	fmt.Println(StartLineDivider)
