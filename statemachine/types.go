@@ -47,6 +47,7 @@ type Transition struct {
 
 type StateMachine interface {
 	AddTransition(Transition) error
+	AddTransitions(...Transition) error
 	TriggerTransition(context.Context, TransitionEvent, TransitionModel) (TransitionModel, error)
 	GetTransitions() (EventKey, map[EventKey]Transition)
 }

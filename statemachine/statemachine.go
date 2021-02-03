@@ -18,6 +18,22 @@ func NewStatemachine(startEvent EventKey) StateMachine {
 	}
 }
 
+func (s *stateMachine) AddTransitions(ts ...Transition) error {
+
+	if s.transitions == nil {
+		return errors.New("transition is not added")
+	}
+
+	for _, t := range ts {
+		err := s.AddTransition(t)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (s *stateMachine) AddTransition(t Transition) error {
 
 	if s.transitions == nil {
