@@ -40,11 +40,6 @@ func (s *stateMachine) TriggerTransition(ctx context.Context, e TransitionEvent,
 		return errors.New("model is nil")
 	}
 
-	currentState := t.GetState()
-	if currentState == "" {
-		return errors.New("currentState is nil")
-	}
-
 	tr, ok := s.transitions[EventKey{Src: t.GetState(), Event: e.GetEvent()}]
 	if !ok {
 		err := errors.New("transition is not defined")
