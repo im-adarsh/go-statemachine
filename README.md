@@ -3,7 +3,13 @@
 
 ![Image of Statemachine](static/activity-diagram.png)
 
+# Installation
+```go
+go get -u github.com/im-adarsh/go-statemachine/statemachine
 ```
+
+# How to use
+```go
 package main
 
 import (
@@ -174,7 +180,7 @@ func onFailure() statemachine.OnFailureHandler {
 
 ```
 
-## Output
+# Output
 ```
 ######################################################
 | Node :  LIQUID |
