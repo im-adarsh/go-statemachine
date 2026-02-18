@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>go-statemachine — Lightweight Temporal for Go</title>
+  <meta name="description" content="Type-safe, stateless state machines for Go. Temporal's power without the infrastructure." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:          #0d1117;
+      --surface:     #161b22;
+      --surface-2:   #21262d;
+      --border:      #30363d;
+      --text:        #e6edf3;
+      --text-muted:  #8b949e;
+      --text-dim:    #484f58;
+      --accent:      #58a6ff;
+      --accent-dark: #1f6feb;
+      --green:       #3fb950;
+      --orange:      #e3b341;
+      --purple:      #bc8cff;
+      --red:         #f85149;
+      --cyan:        #39d353;
+      --radius:      8px;
+      --radius-lg:   12px;
+      --nav-h:       60px;
+      --max-w:       1100px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+    img, svg { display: block; }
+
+    /* ── Scrollbar ────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Layout helpers ───────────────────────────────────────────────────── */
+    .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+    .section { padding: 80px 0; }
+    .section-sm { padding: 48px 0; }
+
+    /* ── Typography ───────────────────────────────────────────────────────── */
+    h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 800; line-height: 1.15; letter-spacing: -0.03em; }
+    h2 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 12px; }
+    h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
+    p  { color: var(--text-muted); line-height: 1.7; }
+    .eyebrow {
+      font-size: 0.75rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+    }
+
+    /* ── Navigation ───────────────────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      height: var(--nav-h);
+      background: rgba(13,17,23,.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w); margin: 0 auto; padding: 0 24px;
+      height: 100%; display: flex; align-items: center; gap: 32px;
+    }
+    .nav-logo {
+      font-size: 0.95rem; font-weight: 700; color: var(--text); white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .nav-logo svg { color: var(--green); }
+    .nav-links { display: flex; gap: 24px; flex: 1; }
+    .nav-links a { font-size: 0.875rem; color: var(--text-muted); font-weight: 500; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .nav-cta {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 16px; border-radius: var(--radius);
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
+      border: none; transition: all .15s ease;
+    }
+    .btn-outline {
+      background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    }
+    .btn-outline:hover { border-color: var(--text-muted); color: var(--text); text-decoration: none; }
+    .btn-accent {
+      background: var(--accent-dark); color: #fff; border: 1px solid var(--accent);
+    }
+    .btn-accent:hover { background: var(--accent); text-decoration: none; }
+
+    /* ── Hero ─────────────────────────────────────────────────────────────── */
+    #hero {
+      padding: 96px 0 80px;
+      position: relative; overflow: hidden;
+    }
+    #hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(88,166,255,.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 4px 12px; border-radius: 999px;
+      border: 1px solid rgba(88,166,255,.3);
+      background: rgba(88,166,255,.08);
+      font-size: 0.8rem; font-weight: 600; color: var(--accent);
+      margin-bottom: 24px;
+    }
+    .hero-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .hero-title { margin-bottom: 20px; }
+    .hero-title .go { color: var(--cyan); }
+    .hero-title .sm { color: var(--accent); }
+    .hero-subtitle {
+      font-size: clamp(1rem, 2vw, 1.2rem); color: var(--text-muted);
+      max-width: 600px; margin-bottom: 36px;
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 48px; }
+    .btn-hero-primary {
+      padding: 12px 24px; border-radius: var(--radius); font-size: 1rem;
+      background: var(--accent); color: #000; font-weight: 700; border: none;
+      cursor: pointer; transition: all .15s;
+    }
+    .btn-hero-primary:hover { background: #79bcff; text-decoration: none; }
+    .btn-hero-secondary {
+      padding: 12px 24px; border-radius: var(--radius); font-size: 1rem;
+      background: var(--surface); color: var(--text); font-weight: 600;
+      border: 1px solid var(--border); cursor: pointer; transition: all .15s;
+    }
+    .btn-hero-secondary:hover { background: var(--surface-2); text-decoration: none; }
+    .install-box {
+      display: inline-flex; align-items: center; gap: 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 16px;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;
+    }
+    .install-box .prompt { color: var(--text-dim); }
+    .install-box .cmd { color: var(--green); }
+    .copy-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; cursor: pointer;
+      font-family: inherit; transition: all .15s;
+    }
+    .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+    .badge {
+      padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+      border: 1px solid;
+    }
+    .badge-blue  { color: var(--accent); border-color: rgba(88,166,255,.3); background: rgba(88,166,255,.08); }
+    .badge-green { color: var(--green);  border-color: rgba(63,185,80,.3);  background: rgba(63,185,80,.08); }
+    .badge-purple{ color: var(--purple); border-color: rgba(188,140,255,.3);background: rgba(188,140,255,.08); }
+
+    /* ── Comparison table ─────────────────────────────────────────────────── */
+    .compare-table { width: 100%; border-collapse: collapse; margin-top: 32px; }
+    .compare-table th, .compare-table td {
+      padding: 12px 16px; text-align: left;
+      border-bottom: 1px solid var(--border); font-size: 0.875rem;
+    }
+    .compare-table th { color: var(--text-muted); font-weight: 600; background: var(--surface); }
+    .compare-table th:first-child { border-radius: var(--radius) 0 0 0; }
+    .compare-table th:last-child { border-radius: 0 var(--radius) 0 0; }
+    .compare-table tr:last-child td { border-bottom: none; }
+    .compare-table tr:hover td { background: var(--surface-2); }
+    .compare-table td:first-child { color: var(--text); font-weight: 500; }
+    .tick   { color: var(--green);  font-weight: 700; }
+    .cross  { color: var(--text-dim); }
+    .manual { color: var(--orange); }
+
+    /* ── Feature grid ─────────────────────────────────────────────────────── */
+    .features-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px;
+      margin-top: 40px;
+    }
+    .feature-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 24px;
+      transition: border-color .2s, transform .2s;
+    }
+    .feature-card:hover { border-color: var(--accent-dark); transform: translateY(-2px); }
+    .feature-icon {
+      width: 40px; height: 40px; border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 14px; font-size: 1.3rem;
+    }
+    .feature-card h3 { font-size: 0.95rem; margin-bottom: 6px; }
+    .feature-card p  { font-size: 0.825rem; line-height: 1.6; }
+
+    /* ── ShopFlow section ─────────────────────────────────────────────────── */
+    .shopflow-intro { max-width: 680px; margin-bottom: 48px; }
+    .shopflow-intro p { margin-top: 12px; }
+
+    /* State diagram */
+    .state-diagram {
+      display: flex; align-items: flex-start; justify-content: center;
+      flex-wrap: wrap; gap: 0; margin: 40px 0;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+      overflow-x: auto;
+    }
+    .sd-col { display: flex; flex-direction: column; align-items: center; }
+    .sd-state {
+      padding: 8px 16px; border-radius: var(--radius);
+      border: 1px solid; font-weight: 600; font-size: 0.8rem;
+      white-space: nowrap; text-align: center;
+    }
+    .sd-state-neutral { border-color: var(--border); background: var(--surface); color: var(--text); }
+    .sd-state-blue    { border-color: rgba(88,166,255,.5); background: rgba(88,166,255,.1); color: var(--accent); }
+    .sd-state-green   { border-color: rgba(63,185,80,.5);  background: rgba(63,185,80,.1);  color: var(--green); }
+    .sd-state-red     { border-color: rgba(248,81,73,.5);  background: rgba(248,81,73,.1);  color: var(--red); }
+    .sd-state-purple  { border-color: rgba(188,140,255,.5);background: rgba(188,140,255,.1);color: var(--purple); }
+    .sd-arrow-h {
+      display: flex; align-items: center; padding: 0 4px;
+      color: var(--text-dim); font-size: 0.7rem;
+    }
+    .sd-arrow-h .label { color: var(--text-muted); margin: 0 4px; }
+    .sd-arrow-v {
+      display: flex; flex-direction: column; align-items: center;
+      color: var(--text-dim); font-size: 0.7rem; margin: 2px 0;
+    }
+    .sd-arrow-v .label { color: var(--text-muted); writing-mode: horizontal-tb; }
+
+    /* Scenario tabs */
+    .tabs { border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 0; }
+    .tab-btn {
+      padding: 10px 18px; border: none; background: none; color: var(--text-muted);
+      font-family: inherit; font-size: 0.875rem; font-weight: 500; cursor: pointer;
+      border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all .15s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-badge {
+      font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 999px;
+      background: rgba(88,166,255,.15); color: var(--accent);
+    }
+    .tab-panels { margin-top: 0; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media(max-width: 768px) { .tab-panel.active { grid-template-columns: 1fr; } }
+
+    .panel-code {
+      background: #1c2128; border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: auto;
+    }
+    .panel-code pre { margin: 0 !important; border-radius: var(--radius-lg) !important; }
+    .panel-code pre code { font-size: 0.8rem !important; line-height: 1.6 !important; }
+    .panel-explain {
+      padding: 24px 4px;
+    }
+    .panel-explain h3 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text); }
+    .panel-explain p  { font-size: 0.875rem; margin-bottom: 12px; }
+    .explain-point {
+      display: flex; gap: 12px; margin-bottom: 14px; align-items: flex-start;
+    }
+    .explain-num {
+      flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+      background: var(--accent-dark); color: var(--accent);
+      font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    }
+    .explain-text { font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; }
+    .explain-text strong { color: var(--text); }
+    .scenario-tag {
+      display: inline-block; font-size: 0.7rem; font-weight: 600;
+      padding: 2px 8px; border-radius: 4px; margin-bottom: 12px;
+      background: rgba(88,166,255,.1); color: var(--accent);
+      border: 1px solid rgba(88,166,255,.2); letter-spacing: .04em;
+    }
+
+    /* ── API Table ────────────────────────────────────────────────────────── */
+    .api-section { margin-top: 40px; }
+    .api-group { margin-bottom: 36px; }
+    .api-group-title {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 12px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .api-table { width: 100%; border-collapse: collapse; }
+    .api-table td {
+      padding: 10px 12px; border-bottom: 1px solid rgba(48,54,61,.6);
+      font-size: 0.85rem; vertical-align: top;
+    }
+    .api-table tr:last-child td { border-bottom: none; }
+    .api-table td:first-child {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;
+      color: var(--accent); white-space: nowrap; width: 40%;
+    }
+    .api-table td:last-child { color: var(--text-muted); }
+
+    /* ── Quick Start ─────────────────────────────────────────────────────── */
+    .qs-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 20px; margin-top: 32px; }
+    .qs-step {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 24px;
+    }
+    .qs-step-num {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--accent-dark);
+      color: var(--accent); font-weight: 700; font-size: 0.85rem;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+    }
+    .qs-step h3 { font-size: 0.95rem; margin-bottom: 8px; }
+    .qs-step p  { font-size: 0.825rem; margin-bottom: 12px; }
+    .inline-code {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;
+      background: var(--surface-2); border: 1px solid var(--border);
+      padding: 2px 6px; border-radius: 4px; color: var(--green);
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border); padding: 40px 0;
+      color: var(--text-muted); font-size: 0.85rem;
+    }
+    .footer-inner {
+      max-width: var(--max-w); margin: 0 auto; padding: 0 24px;
+      display: flex; flex-wrap: wrap; gap: 24px; justify-content: space-between; align-items: center;
+    }
+    .footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
+    .footer-links a { color: var(--text-muted); font-size: 0.85rem; }
+    .footer-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* ── Prism overrides ─────────────────────────────────────────────────── */
+    pre[class*=language-] {
+      background: #1c2128 !important;
+      border-radius: var(--radius-lg) !important;
+      margin: 0 !important;
+      padding: 20px !important;
+    }
+    code[class*=language-] { font-size: 0.8rem !important; }
+    .token.keyword   { color: #ff7b72 !important; }
+    .token.string    { color: #a5d6ff !important; }
+    .token.comment   { color: #6e7681 !important; font-style: italic; }
+    .token.function  { color: #d2a8ff !important; }
+    .token.number    { color: #79c0ff !important; }
+    .token.operator  { color: #ff7b72 !important; }
+    .token.punctuation { color: #e6edf3 !important; }
+    .token.builtin   { color: #ffa657 !important; }
+    .token.type-name { color: #ffa657 !important; }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media(max-width:640px) {
+      .nav-links { display: none; }
+      .nav-cta   { margin-left: auto; }
+      .section   { padding: 56px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ Navigation ═══════════════════════════════════════════════════════════ -->
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="#">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M10 2L3 6v8l7 4 7-4V6L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M10 2v12M3 6l7 4 7-4" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      go-statemachine
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#shopflow">ShopFlow</a>
+      <a href="#quickstart">Quick Start</a>
+      <a href="#api">API</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-outline" href="https://github.com/im-adarsh/go-statemachine" target="_blank">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+      <a class="btn btn-accent" href="#quickstart">Get Started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ Hero ══════════════════════════════════════════════════════════════════ -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-badge">
+      <div class="hero-badge-dot"></div>
+      Go 1.21+ · Zero infrastructure · MIT License
+    </div>
+    <h1 class="hero-title">
+      <span class="go">go</span><span class="sm">-statemachine</span><br/>
+      Temporal's power,<br/>zero server.
+    </h1>
+    <p class="hero-subtitle">
+      Type-safe, stateless state machines for Go — modelled after Temporal's core concepts.
+      Define a <code>Workflow[T]</code> once, run unlimited <code>Execution</code>s anywhere.
+      No Temporal server, no workers, no persistence layer.
+    </p>
+    <div class="hero-actions">
+      <a class="btn-hero-primary" href="#quickstart">Get Started →</a>
+      <a class="btn-hero-secondary" href="#shopflow">See ShopFlow Example</a>
+    </div>
+    <div class="install-box">
+      <span class="prompt">$</span>
+      <span class="cmd" id="install-cmd">go get github.com/im-adarsh/go-statemachine/workflow</span>
+      <button class="copy-btn" onclick="copyInstall()">copy</button>
+    </div>
+    <div class="hero-badges" style="margin-top:24px">
+      <span class="badge badge-blue">Type-safe generics</span>
+      <span class="badge badge-green">Saga compensation</span>
+      <span class="badge badge-blue">Retry &amp; Timeout</span>
+      <span class="badge badge-purple">Middleware</span>
+      <span class="badge badge-green">Parallel hooks</span>
+      <span class="badge badge-blue">Await &amp; Cancel</span>
+      <span class="badge badge-purple">Event history</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ What is it? ══════════════════════════════════════════════════════════ -->
+<section id="compare" class="section-sm" style="border-top:1px solid var(--border)">
+  <div class="container">
+    <div class="eyebrow">Why go-statemachine</div>
+    <h2>Temporal ideas. No infrastructure.</h2>
+    <p style="max-width:620px;margin-top:8px">
+      Temporal is powerful but requires a server, workers, and a persistence layer.
+      go-statemachine brings the same mental model — Workflows, Executions, Signals,
+      Activities — to in-process state management with zero dependencies.
+    </p>
+    <table class="compare-table" style="margin-top:32px">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>go-statemachine</th>
+          <th>bare <code>switch</code></th>
+          <th>full Temporal</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Type-safe payload</td><td class="tick">✓ generics</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Fluent builder API</td><td class="tick">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Conditional / Switch routing</td><td class="tick">✓</td><td class="manual">manual</td><td class="tick">✓</td></tr>
+        <tr><td>Saga compensation</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Retry with backoff</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Activity timeouts</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Middleware / interceptors</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Parallel state hooks</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Event history</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Await (condition blocking)</td><td class="tick">✓</td><td class="cross">✗</td><td class="tick">✓</td></tr>
+        <tr><td>Infrastructure required</td><td class="tick">✗ none</td><td class="tick">✗ none</td><td class="cross">✓ server</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ Features ══════════════════════════════════════════════════════════════ -->
+<section id="features" class="section" style="border-top:1px solid var(--border)">
+  <div class="container">
+    <div class="eyebrow">Features</div>
+    <h2>Everything you need. Nothing you don't.</h2>
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(88,166,255,.1)">🧬</div>
+        <h3>Type-safe generics</h3>
+        <p>Parameterise the entire workflow on your domain type. No <code>payload.(MyType)</code> — compile-time safety everywhere.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.1)">⚡</div>
+        <h3>Fluent builder</h3>
+        <p>Define multi-state graphs in a readable chain. <code>Define[T]().From().On().To().Build()</code> — self-documenting by design.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(227,179,65,.1)">🔀</div>
+        <h3>Conditional routing</h3>
+        <p><strong>If/ElseIf/Else</strong> for predicate-based branching and <strong>Switch/Case/Default</strong> for value-based dispatch.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(248,81,73,.1)">🔄</div>
+        <h3>Saga compensation</h3>
+        <p>Register activity + compensation pairs. On any failure, completed steps are automatically compensated in reverse order.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(188,140,255,.1)">🔁</div>
+        <h3>Retry with backoff</h3>
+        <p>Exponential backoff, max attempts, interval cap, and <code>NonRetryableErrors</code>. Wrap any activity: <code>Retry(fn, policy)</code>.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(88,166,255,.1)">⏱</div>
+        <h3>Activity timeout</h3>
+        <p>Bound any activity with a hard deadline: <code>Timeout(fn, 5*time.Second)</code>. Composes cleanly with Retry.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.1)">🧩</div>
+        <h3>Middleware</h3>
+        <p>Apply cross-cutting concerns <strong>per-activity</strong> or <strong>workflow-wide</strong>. Perfect for OpenTelemetry, Prometheus, structured logging.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(227,179,65,.1)">⚙️</div>
+        <h3>Parallel state hooks</h3>
+        <p><code>OnEnterConcurrent</code> runs multiple activities in parallel goroutines when entering a state. Ideal for fan-out notifications.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(188,140,255,.1)">📜</div>
+        <h3>Event history</h3>
+        <p>Every signal is recorded with from-state, to-state, latency, and error. Complete audit trail without any extra work.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(88,166,255,.1)">⏳</div>
+        <h3>Await &amp; Cancel</h3>
+        <p><code>exec.Await(ctx, condition)</code> blocks until a state condition is met. <code>exec.Cancel()</code> interrupts in-flight activities.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.1)">🔒</div>
+        <h3>Thread-safe</h3>
+        <p>Signals are serialised internally. The immutable <code>Workflow</code> is safe across goroutines. Race-detector clean.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(227,179,65,.1)">📊</div>
+        <h3>Visualise</h3>
+        <p><code>wf.Visualize()</code> prints a human-readable graph of every state and its outgoing transitions. Great for debugging.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ShopFlow Walkthrough ════════════════════════════════════════════════ -->
+<section id="shopflow" class="section" style="border-top:1px solid var(--border)">
+  <div class="container">
+    <div class="eyebrow">ShopFlow — One Application, All Features</div>
+    <div class="shopflow-intro">
+      <h2>E-commerce order processing, explained step by step.</h2>
+      <p>
+        ShopFlow is a fully working e-commerce order workflow that demonstrates every feature
+        of go-statemachine in a single, coherent application. The same <code>Workflow[*Order]</code>
+        definition is reused across seven scenarios — each isolating one concept.
+      </p>
+    </div>
+
+    <!-- State diagram -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;overflow-x:auto">
+      <p class="eyebrow" style="margin-bottom:20px">State diagram</p>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-family:'JetBrains Mono',monospace;font-size:0.75rem;justify-content:center">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span class="sd-state sd-state-neutral">PENDING</span>
+          <span style="color:var(--text-dim)">──<span style="color:var(--text-muted)">validate</span>──▶</span>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span class="sd-state sd-state-blue">PAYMENT_HOLD</span>
+            <span class="sd-state sd-state-red">REJECTED</span>
+          </div>
+          <span style="color:var(--text-dim)">──<span style="color:var(--text-muted)">fulfil</span>──▶</span>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span class="sd-state sd-state-blue">FULFILLING_EXPRESS</span>
+            <span class="sd-state sd-state-blue">FULFILLING_STANDARD</span>
+            <span class="sd-state sd-state-blue">FULFILLING_ECONOMY</span>
+          </div>
+          <span style="color:var(--text-dim)">──<span style="color:var(--text-muted)">ship</span>──▶</span>
+          <span class="sd-state sd-state-blue">SHIPPED</span>
+          <span style="color:var(--text-dim)">──<span style="color:var(--text-muted)">deliver</span>──▶</span>
+          <span class="sd-state sd-state-green">DELIVERED</span>
+        </div>
+      </div>
+      <div style="margin-top:16px;text-align:center;font-size:0.75rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace">
+        Any state (except DELIVERED) ──<span style="color:var(--orange)">cancel</span>──▶ <span style="color:var(--purple)">CANCELLED</span>
+      </div>
+    </div>
+
+    <!-- Scenario tabs -->
+    <div style="margin-top:48px">
+      <div class="tabs" id="tabs">
+        <button class="tab-btn active" data-tab="t-define">
+          <span>Define</span><span class="tab-badge">1</span>
+        </button>
+        <button class="tab-btn" data-tab="t-conditional">
+          <span>Conditional</span><span class="tab-badge">2</span>
+        </button>
+        <button class="tab-btn" data-tab="t-switch">
+          <span>Switch</span><span class="tab-badge">3</span>
+        </button>
+        <button class="tab-btn" data-tab="t-saga">
+          <span>Saga</span><span class="tab-badge">4</span>
+        </button>
+        <button class="tab-btn" data-tab="t-retry">
+          <span>Retry &amp; Timeout</span><span class="tab-badge">5</span>
+        </button>
+        <button class="tab-btn" data-tab="t-middleware">
+          <span>Middleware</span><span class="tab-badge">6</span>
+        </button>
+        <button class="tab-btn" data-tab="t-hooks">
+          <span>Parallel Hooks</span><span class="tab-badge">7</span>
+        </button>
+        <button class="tab-btn" data-tab="t-await">
+          <span>Await &amp; Cancel</span><span class="tab-badge">8</span>
+        </button>
+      </div>
+
+      <div class="tab-panels" style="background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-lg) var(--radius-lg);padding:28px">
+
+        <!-- Tab 1: Define -->
+        <div class="tab-panel active" id="t-define">
+          <div class="panel-code">
+<pre><code class="language-go">// Order is the type-safe payload — no any, no type assertions.
+type Order struct {
+    ID           string
+    CustomerName string
+    Amount       float64
+    Tier         string  // "express" | "standard" | "economy"
+    FraudScore   float64 // 0.0–1.0
+
+    // Filled by activities:
+    ChargeRef    string
+    InventoryRef string
+    CarrierRef   string
+}
+
+// Build once — share across every Order instance.
+// Workflow[*Order] is immutable and goroutine-safe.
+var shopWF = workflow.Define[*Order]().
+    WithMiddleware(metricsMiddleware).
+    OnEnterConcurrent("SHIPPED",
+        sendShippingEmail,
+        pushMobileNotification,
+        updateWarehouseDashboard,
+    ).
+    From("PENDING").On("validate").
+        If(isFraudulent, "REJECTED").
+        Else("PAYMENT_HOLD").
+    From("PAYMENT_HOLD").On("fulfil").
+        Switch(tierKey).
+        Case("express", "FULFILLING_EXPRESS").
+        Case("standard", "FULFILLING_STANDARD").
+        Default("FULFILLING_ECONOMY").
+    // ... more transitions
+    MustBuild()
+
+// Create a stateful Execution for each order.
+exec := shopWF.NewExecution(ctx, "PENDING")
+exec.Signal(ctx, "validate", order)
+fmt.Println(exec.CurrentState()) // PAYMENT_HOLD</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 1 — HAPPY PATH</div>
+            <h3>Define the Workflow</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong>Type parameter <code>T</code></strong> — the entire workflow is parameterised on <code>*Order</code>. Every Activity, Condition, and hook receives <code>*Order</code> — no type assertions anywhere.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Immutable Workflow</strong> — <code>MustBuild()</code> compiles the definition. The resulting <code>*Workflow[*Order]</code> is safe to share across goroutines without any locking.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Stateful Execution</strong> — <code>NewExecution</code> creates one stateful instance per order. Each Execution tracks current state, history, and lifecycle context independently.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong>Fluent builder</strong> — <code>From().On().To()</code> reads like a specification. Multiple <code>From</code> states can share the same signal: <code>From("A","B").On("cancel").To("CANCELLED")</code>.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Conditional If/Else -->
+        <div class="tab-panel" id="t-conditional">
+          <div class="panel-code">
+<pre><code class="language-go">// Conditions are typed — receive *Order, not any.
+func isFraudulent(_ context.Context, o *Order) bool {
+    return o.FraudScore >= 0.70
+}
+
+// validate signal routes based on fraud score.
+From("PENDING").On("validate").
+    If(isFraudulent, "REJECTED").
+    Else("PAYMENT_HOLD")
+
+// ── Scenario 2: run both cases ────────────────────────────
+cleanOrder := &Order{ID: "ORD-A", FraudScore: 0.2}
+exec1 := shopWF.NewExecution(ctx, "PENDING")
+exec1.Signal(ctx, "validate", cleanOrder)
+// exec1.CurrentState() == "PAYMENT_HOLD" ✓
+
+suspiciousOrder := &Order{ID: "ORD-B", FraudScore: 0.85}
+exec2 := shopWF.NewExecution(ctx, "PENDING")
+exec2.Signal(ctx, "validate", suspiciousOrder)
+// exec2.CurrentState() == "REJECTED" ✓
+
+// Chain multiple branches with ElseIf:
+From("REVIEW").On("decide").
+    If(isAutoApproved, "APPROVED").
+    ElseIf(needsManualReview, "MANUAL_QUEUE").
+    Else("REJECTED")
+
+// No Else = ErrNoConditionMatched returned if nothing matches.</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 2 — FRAUD REJECTION</div>
+            <h3>If / ElseIf / Else Routing</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong>Type-safe conditions</strong> — <code>Condition[*Order]</code> is <code>func(context.Context, *Order) bool</code>. The compiler catches any mismatch between the workflow type and the condition signature.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Evaluated in order</strong> — conditions are checked top-to-bottom. The first match wins. If no branch matches and there is no <code>Else</code>, <code>Signal</code> returns <code>ErrNoConditionMatched</code>.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>State unchanged on error</strong> — if no condition matches, the workflow stays in the current state. The caller can inspect the error and retry or take corrective action.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Switch -->
+        <div class="tab-panel" id="t-switch">
+          <div class="panel-code">
+<pre><code class="language-go">// SwitchExpr extracts the routing key from the payload.
+func tierKey(_ context.Context, o *Order) any {
+    return o.Tier // "express" | "standard" | "economy"
+}
+
+// fulfil routes to tier-specific fulfilment state.
+From("PAYMENT_HOLD").On("fulfil").
+    Switch(tierKey).
+    Case("express",  "FULFILLING_EXPRESS").
+    Case("standard", "FULFILLING_STANDARD").
+    Default("FULFILLING_ECONOMY") // unknown tiers land here
+
+// ── Scenario 3: all four tiers ───────────────────────────
+for _, tier := range []string{
+    "express", "standard", "economy", "unknown",
+} {
+    o := &Order{Tier: tier, FraudScore: 0.1}
+    exec := shopWF.NewExecution(ctx, "PENDING")
+    exec.Signal(ctx, "validate", o) // → PAYMENT_HOLD
+    exec.Signal(ctx, "fulfil", o)
+    fmt.Printf("tier=%-10s → %s\n", tier, exec.CurrentState())
+}
+// tier=express    → FULFILLING_EXPRESS
+// tier=standard   → FULFILLING_STANDARD
+// tier=economy    → FULFILLING_ECONOMY
+// tier=unknown    → FULFILLING_ECONOMY  (Default)</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 3 — TIER ROUTING</div>
+            <h3>Switch / Case / Default Routing</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong>Value-based dispatch</strong> — <code>SwitchExpr[T]</code> returns <code>any</code>; the value is compared with each <code>Case</code> using <code>==</code>. Great for enums, status strings, or integer codes.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Default clause</strong> — catches any value that matches no case. Without a <code>Default</code>, an unmatched value returns <code>ErrNoConditionMatched</code>.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Tier-specific states</strong> — each tier lands in its own fulfilment state (<code>FULFILLING_EXPRESS</code>, etc.), which can have different activities, timeouts, and carriers registered on the ship transition.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Saga -->
+        <div class="tab-panel" id="t-saga">
+          <div class="panel-code">
+<pre><code class="language-go">// Each Saga() call registers one step + its compensation.
+// If bookCarrier fails:
+//   → releaseInventory runs  (step 2 compensation)
+//   → refundCard runs        (step 1 compensation)
+// Compensations run in reverse, automatically.
+
+From("FULFILLING_EXPRESS").On("ship").To("SHIPPED").
+    Saga(chargeCard,        refundCard).        // step 1
+    Saga(reserveInventory,  releaseInventory).  // step 2
+    Activity(bookCarrier)                       // step 3 (no comp)
+
+// ── Scenario 4: carrier unavailable ──────────────────────
+o := &Order{ID: "ORD-004-nocarrier", ...}
+exec.Signal(ctx, "ship", o)
+// Output:
+// [charge-card]       charged $89.99 ref=CHG-...
+// [reserve-inventory] reserved ref=INV-...
+// [book-carrier]      no carriers available   ← fails
+// [release-inventory] ↩ releasing ref=INV-... [SAGA COMPENSATION]
+// [refund-card]       ↩ refunding ref=CHG-... [SAGA COMPENSATION]
+
+fmt.Println(o.ChargeRef)    // ""  (refunded)
+fmt.Println(o.InventoryRef) // ""  (released)
+fmt.Println(exec.CurrentState()) // FULFILLING_EXPRESS (unchanged)</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 4 — SAGA ROLLBACK</div>
+            <h3>Saga Compensation Pattern</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong>Zero rollback code</strong> — you declare each step's inverse once with <code>.Saga(activity, compensation)</code>. The library tracks which steps completed and runs compensations automatically on failure.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Reverse order</strong> — compensations execute in the exact opposite sequence of their activities. Step 3 fails → step 2 undone → step 1 undone. Step 3 is never compensated (it never succeeded).</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Best-effort</strong> — compensation errors are suppressed so the original error propagates cleanly to the caller. Log compensation failures via <code>OnError</code> hook or the structuredLogger middleware.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong>Mix with Activity</strong> — <code>.Activity(bookCarrier)</code> without a compensation is also valid. Only steps registered with <code>.Saga()</code> participate in rollback.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 5: Retry & Timeout -->
+        <div class="tab-panel" id="t-retry">
+          <div class="panel-code">
+<pre><code class="language-go">// RetryPolicy controls backoff behaviour.
+var inventoryRetry = workflow.RetryPolicy{
+    MaxAttempts:        4,
+    InitialInterval:    15 * time.Millisecond,
+    BackoffCoefficient: 2.0,  // 15ms → 30ms → 60ms → 120ms
+    // Permanent out-of-stock — never retry.
+    NonRetryableErrors: []error{ErrNoInventory},
+}
+
+// Wrap the activity — retries are transparent to the saga.
+.Saga(
+    workflow.Retry(reserveInventory, inventoryRetry),
+    releaseInventory,
+)
+
+// Bound slow external calls with a hard deadline.
+.Activity(
+    workflow.Timeout(bookCarrier, 200*time.Millisecond),
+)
+
+// Compose: retry inside a timeout.
+.Activity(
+    workflow.Timeout(
+        workflow.Retry(callAPI, retryPolicy),
+        5*time.Second,
+    ),
+)
+
+// ── Scenario 5: timeout fires after ~200ms ───────────────
+start := time.Now()
+err := exec.Signal(ctx, "ship", slowOrder)
+elapsed := time.Since(start) // ≈ 200ms — not 2 seconds
+// errors.Is(err, context.DeadlineExceeded) == true ✓</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 5 — RETRY &amp; TIMEOUT</div>
+            <h3>Resilient Activities</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong><code>Retry(fn, policy)</code></strong> — wraps any <code>Activity[T]</code> with transparent exponential backoff. <code>NonRetryableErrors</code> short-circuit immediately without waiting for max attempts.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong><code>Timeout(fn, duration)</code></strong> — creates a child context with a deadline. The activity is cancelled via <code>ctx.Done()</code> when the deadline fires. Returns <code>context.DeadlineExceeded</code>.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Composition</strong> — both wrappers return <code>Activity[T]</code>, so they compose freely. Retry inside Timeout means each attempt gets its own slice of the overall deadline.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong>Saga-aware</strong> — <code>workflow.Retry(reserveInventory, policy)</code> is still a valid <code>Activity[T]</code> and works seamlessly as a Saga step. Compensation is invoked only if the step ultimately fails after all retries.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 6: Middleware -->
+        <div class="tab-panel" id="t-middleware">
+          <div class="panel-code">
+<pre><code class="language-go">// Middleware[T] = func(Activity[T]) Activity[T]
+
+// ── Workflow-wide (applied to ALL activities at Build time) ─
+var totalCalls atomic.Int64
+
+func metricsMiddleware(
+    next workflow.Activity[*Order],
+) workflow.Activity[*Order] {
+    return func(ctx context.Context, o *Order) error {
+        start := time.Now()
+        err := next(ctx, o)
+        totalCalls.Add(1)
+        // record latency, error count, etc.
+        return err
+    }
+}
+
+// One line to instrument every activity:
+workflow.Define[*Order]().
+    WithMiddleware(metricsMiddleware, tracingMiddleware).
+    // ... transitions
+
+// ── Per-activity (targeted wrapping) ──────────────────────
+func structuredLogger(name string) workflow.Middleware[*Order] {
+    return func(next workflow.Activity[*Order]) workflow.Activity[*Order] {
+        return func(ctx context.Context, o *Order) error {
+            fmt.Printf("[%s] start order=%s\n", name, o.ID)
+            err := next(ctx, o)
+            fmt.Printf("[%s] done  err=%v\n", name, err)
+            return err
+        }
+    }
+}
+
+// Compose: outer(inner(core))
+.Activity(
+    workflow.WithMiddleware(
+        workflow.Retry(chargeCard, policy),
+        circuitBreaker(5),           // outer
+        structuredLogger("charge"),  // inner
+    ),
+)</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 6 — OBSERVABILITY</div>
+            <h3>Middleware</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong>Workflow-wide</strong> — <code>builder.WithMiddleware(mw...)</code> wraps every activity and state hook at <code>Build()</code> time. Ship OpenTelemetry spans for free without touching activity code.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Per-activity</strong> — <code>workflow.WithMiddleware(fn, mw...)</code> wraps a single activity. Use for targeted circuit breakers, custom retry, or detailed logging on critical paths.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Composition order</strong> — first middleware is outermost. <code>WithMiddleware(fn, outer, inner)</code> → <code>outer(inner(fn))</code>. Outer executes first before the call and last after.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong>Zero activity coupling</strong> — activities contain pure business logic. Observability, retry, and timeouts are composed at the workflow definition level, keeping concerns cleanly separated.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 7: Hooks -->
+        <div class="tab-panel" id="t-hooks">
+          <div class="panel-code">
+<pre><code class="language-go">// Three notifications fire in parallel when an order is shipped.
+// All three run concurrently; the transition finishes when all complete.
+
+OnEnterConcurrent("SHIPPED",
+    sendShippingEmail,       // ← these three
+    pushMobileNotification,  // ← run in parallel
+    updateWarehouseDashboard, // ← goroutines
+)
+
+// Sequential alternative (default):
+OnEnter("PAYMENT_HOLD",
+    logToAuditDB,      // runs first
+    chargeReservation, // then this
+)
+
+// OnExit runs before the transition activities:
+OnExit("PENDING",
+    releaseCartReservation,
+)
+
+// ── Execution order for a transition ──────────────────────
+//  1. OnExit hooks   for currentState   (sequential)
+//  2. Transition activities + Saga      (sequential/saga)
+//  3. OnEnter hooks  for newState       (sequential or concurrent)
+//
+// If OnExit fails   → state unchanged, error returned.
+// If OnEnter fails  → state IS the new state (already transitioned),
+//                     error returned so caller is aware.</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 1 — HAPPY PATH</div>
+            <h3>Parallel State Hooks</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong><code>OnEnterConcurrent</code></strong> — all activities in the group launch in separate goroutines. The transition completes when the slowest finishes. First error wins; others are discarded.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Fan-out pattern</strong> — ideal for "notify all systems when state changes": email, SMS, Slack, CRM update, metrics — all fire at once instead of chaining.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong>Execution order</strong> — <em>OnExit</em> → transition activities → <em>OnEnter</em>. An OnExit failure stops the transition entirely (state unchanged). An OnEnter failure means the new state <em>is</em> set but the error is returned.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong>Middleware applies</strong> — workflow-wide middleware wraps hook activities too, so OpenTelemetry spans and metrics cover hooks automatically.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 8: Await & Cancel -->
+        <div class="tab-panel" id="t-await">
+          <div class="panel-code">
+<pre><code class="language-go">// ── Await: block until condition is met ───────────────────
+// condition receives the current state — no lock re-entry.
+awaitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+defer cancel()
+
+err := exec.Await(awaitCtx, func(state string) bool {
+    return state == "DELIVERED"
+})
+// Returns nil when DELIVERED, context.DeadlineExceeded on timeout,
+// or ErrExecutionCancelled if exec.Cancel() was called.
+
+// Works great in goroutines — Await is lock-safe and unblocks
+// on every Signal completion.
+go func() {
+    time.Sleep(50 * time.Millisecond)
+    exec.Signal(ctx, "validate", order)
+    exec.Signal(ctx, "fulfil", order)
+    exec.Signal(ctx, "ship", order)
+    exec.Signal(ctx, "deliver", order)
+}()
+exec.Await(awaitCtx, func(s string) bool { return s == "DELIVERED" })
+
+// ── Cancel: abort the execution ───────────────────────────
+exec.Cancel()
+
+// In-flight activities receive ctx.Done() — they can clean up.
+// Subsequent Signal calls return ErrExecutionCancelled.
+err := exec.Signal(ctx, "ship", order)
+errors.Is(err, workflow.ErrExecutionCancelled) // true
+
+// Know when it's done:
+select {
+case &lt;-exec.Done():
+    fmt.Println("execution is cancelled")
+}</code></pre>
+          </div>
+          <div class="panel-explain">
+            <div class="scenario-tag">SCENARIO 7 — CANCELLATION &amp; AWAIT</div>
+            <h3>Await &amp; Cancellation</h3>
+            <div class="explain-point">
+              <div class="explain-num">1</div>
+              <div class="explain-text"><strong><code>Await(ctx, condition)</code></strong> — blocks efficiently on a <code>sync.Cond</code>. Wakes after every completed signal. The current state is passed to the condition — no extra locking needed.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">2</div>
+              <div class="explain-text"><strong>Context-aware</strong> — if the caller's <code>ctx</code> is cancelled (timeout, deadline, <code>cancel()</code>), Await returns immediately with the context's error. No goroutine leaks.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">3</div>
+              <div class="explain-text"><strong><code>Cancel()</code></strong> — cancels the execution's lifecycle context. Activities that check <code>ctx.Done()</code> are interrupted. Future <code>Signal</code> calls return <code>ErrExecutionCancelled</code> without running any activities.</div>
+            </div>
+            <div class="explain-point">
+              <div class="explain-num">4</div>
+              <div class="explain-text"><strong><code>Done()</code></strong> — returns a channel closed when the execution is cancelled. Use it with <code>select</code> to detect cancellation from outside without polling.</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /tab-panels -->
+    </div>
+
+    <!-- Run the example -->
+    <div style="margin-top:32px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px">
+      <p class="eyebrow" style="margin-bottom:12px">Run the ShopFlow example</p>
+      <div class="install-box" style="width:100%">
+        <span class="prompt">$</span>
+        <span class="cmd">go run github.com/im-adarsh/go-statemachine/examples/shopflow</span>
+        <button class="copy-btn" onclick="copyRun()">copy</button>
+      </div>
+      <p style="margin-top:16px;font-size:0.85rem">
+        The example runs all 7 scenarios and prints the state transitions, activity calls, saga compensations, and event history for each.
+        Source: <a href="https://github.com/im-adarsh/go-statemachine/blob/main/examples/shopflow/main.go"><code>examples/shopflow/main.go</code></a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Quick Start ════════════════════════════════════════════════════════ -->
+<section id="quickstart" class="section" style="border-top:1px solid var(--border)">
+  <div class="container">
+    <div class="eyebrow">Quick Start</div>
+    <h2>Up and running in three steps.</h2>
+    <div class="qs-steps">
+
+      <div class="qs-step">
+        <div class="qs-step-num">1</div>
+        <h3>Install</h3>
+        <p>Requires Go 1.21 or later.</p>
+        <div class="install-box" style="font-size:0.78rem">
+          <span class="prompt">$</span>
+          <span class="cmd">go get github.com/im-adarsh/go-statemachine/workflow</span>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="qs-step-num">2</div>
+        <h3>Define your domain type</h3>
+        <p>Any struct works. <span class="inline-code">T</span> flows through every activity and condition — no casting.</p>
+<pre style="margin-top:8px"><code class="language-go">type Order struct {
+    ID       string
+    Approved bool
+}
+</code></pre>
+      </div>
+
+      <div class="qs-step">
+        <div class="qs-step-num">3</div>
+        <h3>Define, build, run</h3>
+        <p>One <span class="inline-code">Workflow</span>, unlimited <span class="inline-code">Execution</span>s.</p>
+<pre style="margin-top:8px"><code class="language-go">wf := workflow.Define[*Order]().
+    From("PENDING").On("approve").To("APPROVED").
+    From("PENDING").On("reject").To("REJECTED").
+    From("APPROVED").On("ship").To("SHIPPED").
+    MustBuild()
+
+exec := wf.NewExecution(ctx, "PENDING")
+exec.Signal(ctx, "approve", &Order{ID:"1"})
+exec.Signal(ctx, "ship",    &Order{ID:"1"})
+fmt.Println(exec.CurrentState()) // SHIPPED
+</code></pre>
+      </div>
+
+    </div>
+
+    <div style="margin-top:32px">
+      <p class="eyebrow" style="margin-bottom:16px">Full example with all features</p>
+<pre><code class="language-go">package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    "github.com/im-adarsh/go-statemachine/workflow"
+)
+
+type Payment struct{ ID string; Amount float64 }
+
+var wf = workflow.Define[*Payment]().
+    WithMiddleware(func(next workflow.Activity[*Payment]) workflow.Activity[*Payment] {
+        return func(ctx context.Context, p *Payment) error {
+            fmt.Printf("[%s] activity start\n", p.ID)
+            return next(ctx, p)
+        }
+    }).
+    OnEnterConcurrent("CHARGING", notifyRiskTeam, updateDashboard).
+    From("PENDING").On("start").To("CHARGING").
+        Activity(workflow.Retry(validatePayment, workflow.RetryPolicy{
+            MaxAttempts: 3, InitialInterval: 100 * time.Millisecond,
+        })).
+    From("CHARGING").On("charge").To("COMPLETE").
+        Saga(
+            workflow.Timeout(chargeCard, 5*time.Second),  // saga step
+            refundCard,                                   // compensation
+        ).
+    MustBuild()
+
+func main() {
+    ctx := context.Background()
+    p := &Payment{ID: "PAY-1", Amount: 49.99}
+
+    exec := wf.NewExecution(ctx, "PENDING",
+        workflow.WithHooks(workflow.ExecutionHooks[*Payment]{
+            OnTransition: func(_ context.Context, from, to, sig string, p *Payment) {
+                fmt.Printf("%s --%s--> %s\n", from, sig, to)
+            },
+        }),
+    )
+
+    exec.Signal(ctx, "start", p)
+    exec.Signal(ctx, "charge", p)
+
+    // Wait until COMPLETE (already there — returns immediately).
+    exec.Await(ctx, func(state string) bool { return state == "COMPLETE" })
+
+    for _, e := range exec.History() {
+        fmt.Printf("  %s: %v\n", e.Signal, e.Duration)
+    }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ API Reference ══════════════════════════════════════════════════════ -->
+<section id="api" class="section" style="border-top:1px solid var(--border)">
+  <div class="container">
+    <div class="eyebrow">API Reference</div>
+    <h2>Complete API surface.</h2>
+    <div class="api-section">
+
+      <div class="api-group">
+        <div class="api-group-title">Entry Point</div>
+        <table class="api-table">
+          <tr><td>workflow.Define[T]()</td><td>Start a new workflow definition. T is the payload type.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">Builder — *Builder[T]</div>
+        <table class="api-table">
+          <tr><td>.From(states...)</td><td>Specify one or more source states.</td></tr>
+          <tr><td>.OnEnter(state, fns...)</td><td>Sequential activities on state entry.</td></tr>
+          <tr><td>.OnEnterConcurrent(state, fns...)</td><td>Parallel activities on state entry.</td></tr>
+          <tr><td>.OnExit(state, fns...)</td><td>Sequential activities on state exit.</td></tr>
+          <tr><td>.OnExitConcurrent(state, fns...)</td><td>Parallel activities on state exit.</td></tr>
+          <tr><td>.WithLogger(Logger)</td><td>Set a custom transition logger.</td></tr>
+          <tr><td>.WithMiddleware(mw...)</td><td>Apply middleware to every activity and hook.</td></tr>
+          <tr><td>.Build()</td><td>Compile. Returns (*Workflow[T], error).</td></tr>
+          <tr><td>.MustBuild()</td><td>Compile. Panics on error. Safe for package-level vars.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">Route builders (chained after From().On())</div>
+        <table class="api-table">
+          <tr><td>.To(dst)</td><td>Simple unconditional route → SimpleRouteBuilder.</td></tr>
+          <tr><td>.If(cond, dst)</td><td>Conditional branch → IfBuilder.</td></tr>
+          <tr><td>.ElseIf(cond, dst)</td><td>Additional conditional branch (on IfBuilder).</td></tr>
+          <tr><td>.Else(dst)</td><td>Fallback branch (on IfBuilder).</td></tr>
+          <tr><td>.Switch(expr)</td><td>Value-based routing → SwitchBuilder.</td></tr>
+          <tr><td>.Case(value, dst)</td><td>A value-to-destination mapping (on SwitchBuilder).</td></tr>
+          <tr><td>.Default(dst)</td><td>Fallback (on SwitchBuilder).</td></tr>
+          <tr><td>.Activity(fns...)</td><td>Register transition activities (sequential).</td></tr>
+          <tr><td>.Saga(activity, comp)</td><td>Register a saga step with its compensation.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">*Workflow[T]</div>
+        <table class="api-table">
+          <tr><td>.Signal(ctx, state, signal, payload)</td><td>Stateless: returns (newState, error). Caller manages state.</td></tr>
+          <tr><td>.NewExecution(ctx, initialState, opts...)</td><td>Create a stateful Execution.</td></tr>
+          <tr><td>.AvailableSignals(state)</td><td>Signals accepted in state, sorted.</td></tr>
+          <tr><td>.States()</td><td>All states with outgoing transitions.</td></tr>
+          <tr><td>.Visualize()</td><td>Human-readable text diagram.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">*Execution[T]</div>
+        <table class="api-table">
+          <tr><td>.Signal(ctx, signal, payload)</td><td>Drive transition. Thread-safe; signals are serialised.</td></tr>
+          <tr><td>.CurrentState()</td><td>Current state. Always responsive — never blocks on activities.</td></tr>
+          <tr><td>.CanReceive(signal)</td><td>Is signal accepted in current state?</td></tr>
+          <tr><td>.SetState(state)</td><td>Override state without running hooks or activities.</td></tr>
+          <tr><td>.AvailableSignals()</td><td>Signals accepted in current state.</td></tr>
+          <tr><td>.History()</td><td>Snapshot of all signal attempts ([]HistoryEntry).</td></tr>
+          <tr><td>.Cancel()</td><td>Cancel execution context; interrupts in-flight activities.</td></tr>
+          <tr><td>.Done()</td><td>Channel closed when execution is cancelled.</td></tr>
+          <tr><td>.Await(ctx, func(state string) bool)</td><td>Block until condition or cancellation.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">Activity wrappers</div>
+        <table class="api-table">
+          <tr><td>workflow.Retry(fn, RetryPolicy)</td><td>Transparent exponential-backoff retry.</td></tr>
+          <tr><td>workflow.Timeout(fn, duration)</td><td>Hard per-call deadline via context.</td></tr>
+          <tr><td>workflow.WithMiddleware(fn, mw...)</td><td>Compose middleware around one activity.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">Sentinel errors</div>
+        <table class="api-table">
+          <tr><td>workflow.ErrUnknownSignal</td><td>No transition registered for signal in current state.</td></tr>
+          <tr><td>workflow.ErrNoConditionMatched</td><td>Conditional route had no matching branch.</td></tr>
+          <tr><td>workflow.ErrRetryExhausted</td><td>All retry attempts failed.</td></tr>
+          <tr><td>workflow.ErrExecutionCancelled</td><td>Execution was cancelled before signal could run.</td></tr>
+        </table>
+      </div>
+
+      <div class="api-group">
+        <div class="api-group-title">Types</div>
+        <table class="api-table">
+          <tr><td>Activity[T]</td><td>func(context.Context, T) error</td></tr>
+          <tr><td>Condition[T]</td><td>func(context.Context, T) bool</td></tr>
+          <tr><td>SwitchExpr[T]</td><td>func(context.Context, T) any</td></tr>
+          <tr><td>Middleware[T]</td><td>func(Activity[T]) Activity[T]</td></tr>
+          <tr><td>RetryPolicy</td><td>MaxAttempts, InitialInterval, BackoffCoefficient, MaxInterval, NonRetryableErrors</td></tr>
+          <tr><td>HistoryEntry</td><td>Signal, FromState, ToState, At, Duration, Err</td></tr>
+          <tr><td>ExecutionHooks[T]</td><td>OnTransition, OnError callbacks</td></tr>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Footer ════════════════════════════════════════════════════════════ -->
+<footer>
+  <div class="footer-inner">
+    <span>go-statemachine — MIT License</span>
+    <div class="footer-links">
+      <a href="https://github.com/im-adarsh/go-statemachine">GitHub</a>
+      <a href="https://pkg.go.dev/github.com/im-adarsh/go-statemachine/workflow">pkg.go.dev</a>
+      <a href="https://github.com/im-adarsh/go-statemachine/blob/main/examples/shopflow/main.go">ShopFlow source</a>
+      <a href="https://github.com/im-adarsh/go-statemachine/issues">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<!-- ═══ Scripts ════════════════════════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+<script>
+  // Tab switching
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanels.forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(target).classList.add('active');
+    });
+  });
+
+  // Copy install command
+  function copyInstall() {
+    const text = document.getElementById('install-cmd').textContent;
+    navigator.clipboard.writeText('go get ' + text.replace('go get ', '')).catch(() => {});
+    const btn = event.target;
+    btn.textContent = 'copied!';
+    setTimeout(() => btn.textContent = 'copy', 1800);
+  }
+
+  function copyRun() {
+    navigator.clipboard.writeText('go run github.com/im-adarsh/go-statemachine/examples/shopflow').catch(() => {});
+    const btn = event.target;
+    btn.textContent = 'copied!';
+    setTimeout(() => btn.textContent = 'copy', 1800);
+  }
+
+  // Highlight nav link on scroll
+  const sections = document.querySelectorAll('section[id], nav');
+  const navLinks = document.querySelectorAll('.nav-links a');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(a => {
+          a.style.color = a.getAttribute('href') === '#' + e.target.id
+            ? 'var(--text)' : '';
+        });
+      }
+    });
+  }, { rootMargin: '-40% 0px -50% 0px' });
+  document.querySelectorAll('section[id]').forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
