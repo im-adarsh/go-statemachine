@@ -3,44 +3,46 @@ package workflow
 import "fmt"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Builder-internal pre-compilation types
+// Internal builder state (mutable, per-build)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// routeDef is the mutable, pre-compilation form of a route, accumulated by the
-// fluent builder before Build() compiles it into the immutable route struct.
-type routeDef struct {
+type routeDef[T any] struct {
 	kind routeKind
 
 	// routeSimple
-	dst        string
-	activities []Activity
+	dst   string
+	steps []stepDef[T]
 
 	// routeCond
-	condCases []condCaseDef
+	condCases []condCaseDef[T]
 	elseDst   string
 	hasElse   bool
 
 	// routeSwitch
-	switchExpr  SwitchExpr
-	switchCases []switchCaseDef
+	switchExpr  SwitchExpr[T]
+	switchCases []switchCaseDef[T]
 	defaultDst  string
 	hasDefault  bool
 }
 
-type condCaseDef struct {
-	cond Condition
+type stepDef[T any] struct {
+	activity   Activity[T]
+	compensate Activity[T] // nil = not a Saga step
+}
+
+type condCaseDef[T any] struct {
+	cond Condition[T]
 	dst  string
 }
 
-type switchCaseDef struct {
+type switchCaseDef[T any] struct {
 	value any
 	dst   string
 }
 
-// hookDef records an OnEnter or OnExit Activity group before compilation.
-type hookDef struct {
+type hookDef[T any] struct {
 	state      string
-	activities []Activity
+	activities []Activity[T]
 	concurrent bool
 	entry      bool // true = OnEnter, false = OnExit
 }
@@ -49,376 +51,418 @@ type hookDef struct {
 // Builder
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Builder accumulates Workflow transitions and Activity hooks, then compiles
-// them into an immutable Workflow via Build() or MustBuild().
-// Always start with Define(); the zero value is not usable.
-type Builder struct {
-	routes    map[string]map[string]routeDef
-	hooks     []hookDef
-	logger    Logger
-	buildErrs []error
+// Builder accumulates the workflow definition before compiling it with Build.
+// Obtain one via Define[T]().
+type Builder[T any] struct {
+	routes     map[string]map[string]*routeDef[T]
+	hooks      []hookDef[T]
+	middleware []Middleware[T]
+	logger     Logger
+	buildErrs  []error
 }
 
-// Define returns a new Builder — the entry point for defining a Workflow,
-// analogous to writing a Temporal Workflow function.
+// Define returns a new Builder for a Workflow parameterised on T.
+// T is the payload type passed through every Signal, Activity, and Condition.
 //
-//	wf, err := workflow.Define().
-//	    From("PENDING").On("approve").To("APPROVED").Activity(sendApprovalEmail).
-//	    From("APPROVED").On("ship").To("SHIPPED").
-//	    OnEnter("SHIPPED", notifyCustomer).
+//	wf, err := workflow.Define[*Order]().
+//	    From("PENDING").On("approve").To("APPROVED").
 //	    Build()
-func Define() *Builder {
-	return &Builder{routes: make(map[string]map[string]routeDef)}
-}
-
-func (b *Builder) addRoute(states []string, signal string, r routeDef) {
-	for _, state := range states {
-		if b.routes[state] == nil {
-			b.routes[state] = make(map[string]routeDef)
-		}
-		if _, exists := b.routes[state][signal]; exists {
-			b.buildErrs = append(b.buildErrs,
-				fmt.Errorf("duplicate transition: state=%q signal=%q", state, signal))
-			continue
-		}
-		b.routes[state][signal] = r
+func Define[T any]() *Builder[T] {
+	return &Builder[T]{
+		routes: make(map[string]map[string]*routeDef[T]),
 	}
 }
 
-// WithLogger sets the Logger used to record each executed transition.
-func (b *Builder) WithLogger(l Logger) *Builder {
+// WithLogger sets a custom Logger. Defaults to NoopLogger.
+func (b *Builder[T]) WithLogger(l Logger) *Builder[T] {
 	b.logger = l
 	return b
 }
 
-// OnEnter registers Activities called sequentially when the Execution enters state.
-// Multiple OnEnter calls on the same state append additional sequential groups.
-func (b *Builder) OnEnter(state string, activities ...Activity) *Builder {
-	b.hooks = append(b.hooks, hookDef{state: state, activities: activities, entry: true})
+// WithMiddleware registers workflow-wide middleware applied to every Activity
+// (transitions and hooks alike) at Build time. Middleware is applied in the
+// order given, with the first element being the outermost wrapper.
+//
+//	.WithMiddleware(otelMiddleware, metricsMiddleware)
+func (b *Builder[T]) WithMiddleware(mw ...Middleware[T]) *Builder[T] {
+	b.middleware = append(b.middleware, mw...)
 	return b
 }
 
-// OnEnterParallel registers Activities that run concurrently when the Execution
-// enters state. All Activities in the group are started together; the first error
-// is returned after all goroutines finish.
-func (b *Builder) OnEnterParallel(state string, activities ...Activity) *Builder {
-	b.hooks = append(b.hooks, hookDef{state: state, activities: activities, concurrent: true, entry: true})
+// OnEnter registers Activities to run when the workflow enters state.
+// Multiple calls to OnEnter for the same state are allowed and appended in order.
+func (b *Builder[T]) OnEnter(state string, activities ...Activity[T]) *Builder[T] {
+	b.hooks = append(b.hooks, hookDef[T]{state: state, activities: activities, entry: true})
 	return b
 }
 
-// OnExit registers Activities called sequentially when the Execution exits state.
-func (b *Builder) OnExit(state string, activities ...Activity) *Builder {
-	b.hooks = append(b.hooks, hookDef{state: state, activities: activities, entry: false})
+// OnEnterConcurrent registers Activities that run in parallel when the workflow
+// enters state. It is treated as a single hookGroup.
+func (b *Builder[T]) OnEnterConcurrent(state string, activities ...Activity[T]) *Builder[T] {
+	b.hooks = append(b.hooks, hookDef[T]{state: state, activities: activities, concurrent: true, entry: true})
 	return b
 }
 
-// OnExitParallel registers Activities that run concurrently when the Execution
-// exits state.
-func (b *Builder) OnExitParallel(state string, activities ...Activity) *Builder {
-	b.hooks = append(b.hooks, hookDef{state: state, activities: activities, concurrent: true, entry: false})
+// OnExit registers Activities to run when the workflow leaves state.
+func (b *Builder[T]) OnExit(state string, activities ...Activity[T]) *Builder[T] {
+	b.hooks = append(b.hooks, hookDef[T]{state: state, activities: activities, entry: false})
 	return b
 }
 
-// From begins a transition definition for the given source state(s).
-// Pass multiple states to share a single transition definition.
-func (b *Builder) From(states ...string) *FromBuilder {
-	return &FromBuilder{b: b, states: states}
+// OnExitConcurrent registers Activities that run in parallel when the workflow
+// leaves state.
+func (b *Builder[T]) OnExitConcurrent(state string, activities ...Activity[T]) *Builder[T] {
+	b.hooks = append(b.hooks, hookDef[T]{state: state, activities: activities, concurrent: true, entry: false})
+	return b
 }
 
-// Build compiles all registered definitions into an immutable Workflow.
-// Returns an error if any duplicate transitions were registered.
-func (b *Builder) Build() (*Workflow, error) {
+// From starts a transition definition for one or more source states.
+func (b *Builder[T]) From(states ...string) *FromBuilder[T] {
+	if len(states) == 0 {
+		b.buildErrs = append(b.buildErrs, fmt.Errorf("From() called with no states"))
+	}
+	return &FromBuilder[T]{b: b, states: states}
+}
+
+// Build compiles all definitions into an immutable Workflow.
+// Returns an error if any duplicate or conflicting definitions were registered.
+func (b *Builder[T]) Build() (*Workflow[T], error) {
 	if len(b.buildErrs) > 0 {
 		return nil, b.buildErrs[0]
 	}
 
-	wf := &Workflow{
-		routes:     make(map[string]map[string]*route),
-		entryHooks: make(map[string][]hookGroup),
-		exitHooks:  make(map[string][]hookGroup),
+	wf := &Workflow[T]{
+		routes:     make(map[string]map[string]*route[T]),
+		entryHooks: make(map[string][]hookGroup[T]),
+		exitHooks:  make(map[string][]hookGroup[T]),
 		logger:     b.logger,
 	}
 
+	// Compile routes.
 	for state, signals := range b.routes {
-		wf.routes[state] = make(map[string]*route, len(signals))
-		for sig, rd := range signals {
-			r := &route{
-				kind:       rd.kind,
-				dst:        rd.dst,
-				activities: rd.activities,
+		wf.routes[state] = make(map[string]*route[T])
+		for sig, def := range signals {
+			r := &route[T]{
+				kind:        def.kind,
+				dst:         def.dst,
+				steps:       make([]step[T], len(def.steps)),
+				elseDst:     def.elseDst,
+				hasElse:     def.hasElse,
+				switchExpr:  def.switchExpr,
+				defaultDst:  def.defaultDst,
+				hasDefault:  def.hasDefault,
 			}
-			switch rd.kind {
-			case routeCond:
-				r.condCases = make([]condCase, len(rd.condCases))
-				for i, c := range rd.condCases {
-					r.condCases[i] = condCase{cond: c.cond, dst: c.dst}
+			for i, s := range def.steps {
+				r.steps[i] = step[T]{
+					activity:   b.applyMiddleware(s.activity),
+					compensate: b.applyMiddlewareNilable(s.compensate),
 				}
-				r.elseDst = rd.elseDst
-				r.hasElse = rd.hasElse
-			case routeSwitch:
-				r.switchExpr = rd.switchExpr
-				r.switchCases = make([]switchCase, len(rd.switchCases))
-				for i, sc := range rd.switchCases {
-					r.switchCases[i] = switchCase{value: sc.value, dst: sc.dst}
-				}
-				r.defaultDst = rd.defaultDst
-				r.hasDefault = rd.hasDefault
+			}
+			// Compile condition cases.
+			r.condCases = make([]condCase[T], len(def.condCases))
+			for i, c := range def.condCases {
+				r.condCases[i] = condCase[T]{cond: c.cond, dst: c.dst}
+			}
+			// Compile switch cases.
+			r.switchCases = make([]switchCase[T], len(def.switchCases))
+			for i, sc := range def.switchCases {
+				r.switchCases[i] = switchCase[T]{value: sc.value, dst: sc.dst}
 			}
 			wf.routes[state][sig] = r
 		}
 	}
 
-	for _, h := range b.hooks {
-		g := hookGroup{activities: h.activities, concurrent: h.concurrent}
-		if h.entry {
-			wf.entryHooks[h.state] = append(wf.entryHooks[h.state], g)
+	// Compile hooks.
+	for _, hd := range b.hooks {
+		acts := make([]Activity[T], len(hd.activities))
+		for i, a := range hd.activities {
+			acts[i] = b.applyMiddleware(a)
+		}
+		g := hookGroup[T]{activities: acts, concurrent: hd.concurrent}
+		if hd.entry {
+			wf.entryHooks[hd.state] = append(wf.entryHooks[hd.state], g)
 		} else {
-			wf.exitHooks[h.state] = append(wf.exitHooks[h.state], g)
+			wf.exitHooks[hd.state] = append(wf.exitHooks[hd.state], g)
 		}
 	}
 
 	return wf, nil
 }
 
-// MustBuild compiles the Workflow, panicking if Build returns an error.
-// Useful in package-level var blocks where the definition is statically known.
-func (b *Builder) MustBuild() *Workflow {
+// MustBuild calls Build and panics on error. Useful for package-level vars.
+func (b *Builder[T]) MustBuild() *Workflow[T] {
 	wf, err := b.Build()
 	if err != nil {
-		panic("workflow: Build() failed: " + err.Error())
+		panic("workflow.MustBuild: " + err.Error())
 	}
 	return wf
 }
 
+// applyMiddleware wraps a with the builder's workflow-wide middleware.
+func (b *Builder[T]) applyMiddleware(a Activity[T]) Activity[T] {
+	if len(b.middleware) == 0 {
+		return a
+	}
+	result := a
+	for i := len(b.middleware) - 1; i >= 0; i-- {
+		result = b.middleware[i](result)
+	}
+	return result
+}
+
+// applyMiddlewareNilable wraps a only when a is non-nil.
+func (b *Builder[T]) applyMiddlewareNilable(a Activity[T]) Activity[T] {
+	if a == nil {
+		return nil
+	}
+	return b.applyMiddleware(a)
+}
+
+// ensureRoute returns (or creates) the routeDef for state+signal, recording
+// a build error if the combination was already defined.
+func (b *Builder[T]) ensureRoute(state, signal string) *routeDef[T] {
+	if b.routes[state] == nil {
+		b.routes[state] = make(map[string]*routeDef[T])
+	}
+	if _, exists := b.routes[state][signal]; exists {
+		b.buildErrs = append(b.buildErrs, fmt.Errorf("duplicate transition: state=%q signal=%q", state, signal))
+		return &routeDef[T]{} // dummy to avoid nil dereferences
+	}
+	def := &routeDef[T]{}
+	b.routes[state][signal] = def
+	return def
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// FromBuilder — after From()
+// FromBuilder
 // ─────────────────────────────────────────────────────────────────────────────
 
-// FromBuilder is returned by Builder.From. Call On() to specify the Signal.
-type FromBuilder struct {
-	b      *Builder
+// FromBuilder narrows the definition to a set of source states.
+type FromBuilder[T any] struct {
+	b      *Builder[T]
 	states []string
 }
 
-// On specifies the Signal name that triggers this transition.
-func (fb *FromBuilder) On(signal string) *OnBuilder {
-	return &OnBuilder{b: fb.b, states: fb.states, signal: signal}
+// On specifies the signal that triggers the transition.
+func (fb *FromBuilder[T]) On(signal string) *OnBuilder[T] {
+	return &OnBuilder[T]{b: fb.b, states: fb.states, signal: signal}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OnBuilder — after On()
+// OnBuilder
 // ─────────────────────────────────────────────────────────────────────────────
 
-// OnBuilder is returned by FromBuilder.On. Choose the routing strategy: To, If, or Switch.
-type OnBuilder struct {
-	b      *Builder
-	states []string
-	signal string
-}
-
-// To registers a simple transition that always routes to dst.
-func (ob *OnBuilder) To(dst string) *SimpleRouteBuilder {
-	return &SimpleRouteBuilder{
-		b:      ob.b,
-		states: ob.states,
-		signal: ob.signal,
-		rd:     routeDef{kind: routeSimple, dst: dst},
-	}
-}
-
-// If begins a Condition-based (if-else) routing chain.
-// Follow with .To(dst) to specify the destination for this Condition.
-func (ob *OnBuilder) If(cond Condition) *IfBuilder {
-	return &IfBuilder{
-		b:      ob.b,
-		states: ob.states,
-		signal: ob.signal,
-		rd:     routeDef{kind: routeCond},
-		cond:   cond,
-	}
-}
-
-// Switch begins a value-based routing chain using a SwitchExpr.
-// Follow with .Case(value, dst) calls and optionally .Default(dst).
-func (ob *OnBuilder) Switch(expr SwitchExpr) *SwitchBuilder {
-	return &SwitchBuilder{
-		b:      ob.b,
-		states: ob.states,
-		signal: ob.signal,
-		rd:     routeDef{kind: routeSwitch, switchExpr: expr},
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SimpleRouteBuilder — after To()
-// ─────────────────────────────────────────────────────────────────────────────
-
-// SimpleRouteBuilder is returned after a simple To() routing call.
-// Attach Activities with Activity(), then chain the next definition.
-type SimpleRouteBuilder struct {
-	b      *Builder
+// OnBuilder has selected source states and a signal; choose a routing strategy.
+type OnBuilder[T any] struct {
+	b      *Builder[T]
 	states []string
 	signal string
-	rd     routeDef
 }
 
-// Activity registers one or more Activities that run sequentially during this
-// transition — analogous to calling workflow.ExecuteActivity inside a Temporal
-// Workflow function. Returns self for chaining.
-func (rb *SimpleRouteBuilder) Activity(activities ...Activity) *SimpleRouteBuilder {
-	rb.rd.activities = append(rb.rd.activities, activities...)
+// To registers a simple (unconditional) transition to dst.
+func (ob *OnBuilder[T]) To(dst string) *SimpleRouteBuilder[T] {
+	defs := make([]*routeDef[T], 0, len(ob.states))
+	for _, s := range ob.states {
+		def := ob.b.ensureRoute(s, ob.signal)
+		def.kind = routeSimple
+		def.dst = dst
+		defs = append(defs, def)
+	}
+	return &SimpleRouteBuilder[T]{b: ob.b, defs: defs}
+}
+
+// If starts a conditional (if-else) routing chain.
+func (ob *OnBuilder[T]) If(cond Condition[T], dst string) *IfBuilder[T] {
+	defs := make([]*routeDef[T], 0, len(ob.states))
+	for _, s := range ob.states {
+		def := ob.b.ensureRoute(s, ob.signal)
+		def.kind = routeCond
+		def.condCases = append(def.condCases, condCaseDef[T]{cond: cond, dst: dst})
+		defs = append(defs, def)
+	}
+	return &IfBuilder[T]{b: ob.b, defs: defs}
+}
+
+// Switch starts a switch-case routing chain.
+func (ob *OnBuilder[T]) Switch(expr SwitchExpr[T]) *SwitchBuilder[T] {
+	defs := make([]*routeDef[T], 0, len(ob.states))
+	for _, s := range ob.states {
+		def := ob.b.ensureRoute(s, ob.signal)
+		def.kind = routeSwitch
+		def.switchExpr = expr
+		defs = append(defs, def)
+	}
+	return &SwitchBuilder[T]{b: ob.b, defs: defs}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SimpleRouteBuilder
+// ─────────────────────────────────────────────────────────────────────────────
+
+// SimpleRouteBuilder configures a simple (unconditional) transition.
+type SimpleRouteBuilder[T any] struct {
+	b    *Builder[T]
+	defs []*routeDef[T]
+}
+
+// Activity registers one or more Activities to execute during this transition.
+// Activities run sequentially in the order given. For Saga compensation use Saga.
+func (rb *SimpleRouteBuilder[T]) Activity(activities ...Activity[T]) *SimpleRouteBuilder[T] {
+	for _, a := range activities {
+		for _, def := range rb.defs {
+			def.steps = append(def.steps, stepDef[T]{activity: a})
+		}
+	}
 	return rb
 }
 
-func (rb *SimpleRouteBuilder) commit() { rb.b.addRoute(rb.states, rb.signal, rb.rd) }
-
-// From finalises this transition and starts a new one.
-func (rb *SimpleRouteBuilder) From(states ...string) *FromBuilder { rb.commit(); return rb.b.From(states...) }
-
-// OnEnter finalises and registers sequential OnEnter Activities.
-func (rb *SimpleRouteBuilder) OnEnter(state string, a ...Activity) *Builder { rb.commit(); return rb.b.OnEnter(state, a...) }
-
-// OnEnterParallel finalises and registers concurrent OnEnter Activities.
-func (rb *SimpleRouteBuilder) OnEnterParallel(state string, a ...Activity) *Builder { rb.commit(); return rb.b.OnEnterParallel(state, a...) }
-
-// OnExit finalises and registers sequential OnExit Activities.
-func (rb *SimpleRouteBuilder) OnExit(state string, a ...Activity) *Builder { rb.commit(); return rb.b.OnExit(state, a...) }
-
-// OnExitParallel finalises and registers concurrent OnExit Activities.
-func (rb *SimpleRouteBuilder) OnExitParallel(state string, a ...Activity) *Builder { rb.commit(); return rb.b.OnExitParallel(state, a...) }
-
-// WithLogger finalises and sets the Logger.
-func (rb *SimpleRouteBuilder) WithLogger(l Logger) *Builder { rb.commit(); return rb.b.WithLogger(l) }
-
-// Build finalises and compiles the Workflow.
-func (rb *SimpleRouteBuilder) Build() (*Workflow, error) { rb.commit(); return rb.b.Build() }
-
-// MustBuild finalises and compiles, panicking on error.
-func (rb *SimpleRouteBuilder) MustBuild() *Workflow { rb.commit(); return rb.b.MustBuild() }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IfBuilder — after If() / ElseIf()
-// ─────────────────────────────────────────────────────────────────────────────
-
-// IfBuilder holds a pending Condition. Call To() to set its destination state.
-type IfBuilder struct {
-	b      *Builder
-	states []string
-	signal string
-	rd     routeDef
-	cond   Condition
+// Saga registers an Activity paired with a compensation Activity.
+// If a subsequent step fails, completed Saga compensations run in reverse order.
+//
+//	.Saga(chargeCard, refundCard).
+//	.Saga(deductInventory, restoreInventory)
+func (rb *SimpleRouteBuilder[T]) Saga(activity, compensate Activity[T]) *SimpleRouteBuilder[T] {
+	for _, def := range rb.defs {
+		def.steps = append(def.steps, stepDef[T]{activity: activity, compensate: compensate})
+	}
+	return rb
 }
 
-// To records the destination for the current Condition and returns a BranchBuilder.
-func (ib *IfBuilder) To(dst string) *BranchBuilder {
-	rd := ib.rd // struct copy — safe to append to condCases
-	rd.condCases = append(rd.condCases, condCaseDef{cond: ib.cond, dst: dst})
-	return &BranchBuilder{b: ib.b, states: ib.states, signal: ib.signal, rd: rd}
+// From is a shortcut to start a new transition from the same Builder.
+func (rb *SimpleRouteBuilder[T]) From(states ...string) *FromBuilder[T] {
+	return rb.b.From(states...)
+}
+
+// OnEnter is a shortcut to add a state entry hook.
+func (rb *SimpleRouteBuilder[T]) OnEnter(state string, activities ...Activity[T]) *Builder[T] {
+	return rb.b.OnEnter(state, activities...)
+}
+
+// OnExit is a shortcut to add a state exit hook.
+func (rb *SimpleRouteBuilder[T]) OnExit(state string, activities ...Activity[T]) *Builder[T] {
+	return rb.b.OnExit(state, activities...)
+}
+
+// Build compiles and returns the Workflow.
+func (rb *SimpleRouteBuilder[T]) Build() (*Workflow[T], error) {
+	return rb.b.Build()
+}
+
+// MustBuild panics on error.
+func (rb *SimpleRouteBuilder[T]) MustBuild() *Workflow[T] {
+	return rb.b.MustBuild()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BranchBuilder — after If(...).To() or ElseIf(...).To()
+// IfBuilder / BranchBuilder
 // ─────────────────────────────────────────────────────────────────────────────
 
-// BranchBuilder lets you add more ElseIf branches, a final Else, or finalise.
-type BranchBuilder struct {
-	b      *Builder
-	states []string
-	signal string
-	rd     routeDef
+// IfBuilder continues the if-else conditional routing chain.
+type IfBuilder[T any] struct {
+	b    *Builder[T]
+	defs []*routeDef[T]
 }
 
-// ElseIf adds another Condition branch to the chain.
-func (bb *BranchBuilder) ElseIf(cond Condition) *IfBuilder {
-	return &IfBuilder{b: bb.b, states: bb.states, signal: bb.signal, rd: bb.rd, cond: cond}
+// ElseIf adds another condition branch.
+func (ib *IfBuilder[T]) ElseIf(cond Condition[T], dst string) *IfBuilder[T] {
+	for _, def := range ib.defs {
+		def.condCases = append(def.condCases, condCaseDef[T]{cond: cond, dst: dst})
+	}
+	return ib
 }
 
-// Else sets the fallback destination (runs when all Conditions fail).
-// Returns the Builder so you can continue defining the Workflow.
-func (bb *BranchBuilder) Else(dst string) *Builder {
-	rd := bb.rd
-	rd.elseDst = dst
-	rd.hasElse = true
-	bb.b.addRoute(bb.states, bb.signal, rd)
-	return bb.b
+// Else sets the fallback destination when no condition matches.
+func (ib *IfBuilder[T]) Else(dst string) *BranchBuilder[T] {
+	for _, def := range ib.defs {
+		def.elseDst = dst
+		def.hasElse = true
+	}
+	return &BranchBuilder[T]{b: ib.b}
 }
 
-func (bb *BranchBuilder) commit() { bb.b.addRoute(bb.states, bb.signal, bb.rd) }
+// Build compiles and returns the Workflow (no Else required).
+func (ib *IfBuilder[T]) Build() (*Workflow[T], error) {
+	return ib.b.Build()
+}
 
-// From finalises (no Else) and starts the next transition.
-func (bb *BranchBuilder) From(states ...string) *FromBuilder { bb.commit(); return bb.b.From(states...) }
+// MustBuild panics on error.
+func (ib *IfBuilder[T]) MustBuild() *Workflow[T] {
+	return ib.b.MustBuild()
+}
 
-// OnEnter finalises and registers sequential OnEnter Activities.
-func (bb *BranchBuilder) OnEnter(state string, a ...Activity) *Builder { bb.commit(); return bb.b.OnEnter(state, a...) }
+// From is a shortcut.
+func (ib *IfBuilder[T]) From(states ...string) *FromBuilder[T] {
+	return ib.b.From(states...)
+}
 
-// OnEnterParallel finalises and registers concurrent OnEnter Activities.
-func (bb *BranchBuilder) OnEnterParallel(state string, a ...Activity) *Builder { bb.commit(); return bb.b.OnEnterParallel(state, a...) }
+// BranchBuilder is returned after Else() or Default() to continue the definition.
+type BranchBuilder[T any] struct {
+	b *Builder[T]
+}
 
-// OnExit finalises and registers sequential OnExit Activities.
-func (bb *BranchBuilder) OnExit(state string, a ...Activity) *Builder { bb.commit(); return bb.b.OnExit(state, a...) }
+// From is a shortcut.
+func (bb *BranchBuilder[T]) From(states ...string) *FromBuilder[T] {
+	return bb.b.From(states...)
+}
 
-// OnExitParallel finalises and registers concurrent OnExit Activities.
-func (bb *BranchBuilder) OnExitParallel(state string, a ...Activity) *Builder { bb.commit(); return bb.b.OnExitParallel(state, a...) }
+// OnEnter is a shortcut.
+func (bb *BranchBuilder[T]) OnEnter(state string, activities ...Activity[T]) *Builder[T] {
+	return bb.b.OnEnter(state, activities...)
+}
 
-// WithLogger finalises and sets the Logger.
-func (bb *BranchBuilder) WithLogger(l Logger) *Builder { bb.commit(); return bb.b.WithLogger(l) }
+// OnExit is a shortcut.
+func (bb *BranchBuilder[T]) OnExit(state string, activities ...Activity[T]) *Builder[T] {
+	return bb.b.OnExit(state, activities...)
+}
 
-// Build finalises and compiles the Workflow.
-func (bb *BranchBuilder) Build() (*Workflow, error) { bb.commit(); return bb.b.Build() }
+// Build compiles and returns the Workflow.
+func (bb *BranchBuilder[T]) Build() (*Workflow[T], error) {
+	return bb.b.Build()
+}
 
-// MustBuild finalises and compiles, panicking on error.
-func (bb *BranchBuilder) MustBuild() *Workflow { bb.commit(); return bb.b.MustBuild() }
+// MustBuild panics on error.
+func (bb *BranchBuilder[T]) MustBuild() *Workflow[T] {
+	return bb.b.MustBuild()
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SwitchBuilder — after Switch()
+// SwitchBuilder
 // ─────────────────────────────────────────────────────────────────────────────
 
-// SwitchBuilder accumulates Case and Default entries for a switch-based route.
-type SwitchBuilder struct {
-	b      *Builder
-	states []string
-	signal string
-	rd     routeDef
+// SwitchBuilder constructs a switch-case routing chain.
+type SwitchBuilder[T any] struct {
+	b    *Builder[T]
+	defs []*routeDef[T]
 }
 
-// Case registers a case: when SwitchExpr returns value, route to dst.
-// Multiple Case calls are evaluated in registration order.
-func (sb *SwitchBuilder) Case(value any, dst string) *SwitchBuilder {
-	sb.rd.switchCases = append(sb.rd.switchCases, switchCaseDef{value: value, dst: dst})
+// Case adds a value-to-destination mapping.
+func (sb *SwitchBuilder[T]) Case(value any, dst string) *SwitchBuilder[T] {
+	for _, def := range sb.defs {
+		def.switchCases = append(def.switchCases, switchCaseDef[T]{value: value, dst: dst})
+	}
 	return sb
 }
 
-// Default sets the fallback destination when no Case matches.
-// Returns the Builder so you can continue defining the Workflow.
-func (sb *SwitchBuilder) Default(dst string) *Builder {
-	sb.rd.defaultDst = dst
-	sb.rd.hasDefault = true
-	sb.b.addRoute(sb.states, sb.signal, sb.rd)
-	return sb.b
+// Default sets the fallback destination when no case matches.
+func (sb *SwitchBuilder[T]) Default(dst string) *BranchBuilder[T] {
+	for _, def := range sb.defs {
+		def.defaultDst = dst
+		def.hasDefault = true
+	}
+	return &BranchBuilder[T]{b: sb.b}
 }
 
-func (sb *SwitchBuilder) commit() { sb.b.addRoute(sb.states, sb.signal, sb.rd) }
+// Build compiles and returns the Workflow (no Default required).
+func (sb *SwitchBuilder[T]) Build() (*Workflow[T], error) {
+	return sb.b.Build()
+}
 
-// From finalises (no Default) and starts the next transition.
-func (sb *SwitchBuilder) From(states ...string) *FromBuilder { sb.commit(); return sb.b.From(states...) }
+// MustBuild panics on error.
+func (sb *SwitchBuilder[T]) MustBuild() *Workflow[T] {
+	return sb.b.MustBuild()
+}
 
-// OnEnter finalises and registers sequential OnEnter Activities.
-func (sb *SwitchBuilder) OnEnter(state string, a ...Activity) *Builder { sb.commit(); return sb.b.OnEnter(state, a...) }
-
-// OnEnterParallel finalises and registers concurrent OnEnter Activities.
-func (sb *SwitchBuilder) OnEnterParallel(state string, a ...Activity) *Builder { sb.commit(); return sb.b.OnEnterParallel(state, a...) }
-
-// OnExit finalises and registers sequential OnExit Activities.
-func (sb *SwitchBuilder) OnExit(state string, a ...Activity) *Builder { sb.commit(); return sb.b.OnExit(state, a...) }
-
-// OnExitParallel finalises and registers concurrent OnExit Activities.
-func (sb *SwitchBuilder) OnExitParallel(state string, a ...Activity) *Builder { sb.commit(); return sb.b.OnExitParallel(state, a...) }
-
-// WithLogger finalises and sets the Logger.
-func (sb *SwitchBuilder) WithLogger(l Logger) *Builder { sb.commit(); return sb.b.WithLogger(l) }
-
-// Build finalises and compiles the Workflow.
-func (sb *SwitchBuilder) Build() (*Workflow, error) { sb.commit(); return sb.b.Build() }
-
-// MustBuild finalises and compiles, panicking on error.
-func (sb *SwitchBuilder) MustBuild() *Workflow { sb.commit(); return sb.b.MustBuild() }
+// From is a shortcut.
+func (sb *SwitchBuilder[T]) From(states ...string) *FromBuilder[T] {
+	return sb.b.From(states...)
+}

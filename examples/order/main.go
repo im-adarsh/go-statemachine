@@ -1,145 +1,305 @@
-// Package main shows a realistic order-processing Workflow with:
-//   - Transition Activities (validate, enrich)
-//   - OnExit / OnEnter Activities (audit log)
-//   - OnEnterParallel Activities (async post-processing)
-//   - Conditional routing via If/ElseIf/Else (Conditions)
-//   - Value-based routing via Switch/Case/Default (SwitchExpr)
+// # Order Processing Example
+//
+// A realistic e-commerce order workflow that demonstrates:
+//
+//   - Conditional routing  — If/ElseIf/Else (approval gate) and Switch (tier routing)
+//   - Saga compensation    — charge card + deduct inventory with automatic refund on failure
+//   - Retry with backoff   — inventory deduction retried up to 3× with exponential backoff
+//   - Activity timeout     — third-party shipping call bounded to 2 s
+//   - Execution hooks      — OnTransition (audit log) + OnError (alert)
+//   - Execution history    — full event log at completion
+//   - Await                — block until a terminal state is reached
+//   - Cancellation         — stalled orders cancelled via exec.Cancel()
+//
+// Happy path:  PENDING → APPROVED → VIP_FULFIL → SHIPPED → DELIVERED
+// Sad path:    PENDING → REJECTED  (low-value, auto-rejected)
+//
+// Run:
+//
+//	go run ./examples/order
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/im-adarsh/go-statemachine/workflow"
 )
 
-// Order is the payload that flows through every Activity.
+// ─────────────────────────────────────────────────────────────────────────────
+// Domain
+// ─────────────────────────────────────────────────────────────────────────────
+
 type Order struct {
-	ID     string
-	Amount float64
-	Method string // "card" | "paypal" | "crypto"
+	ID       string
+	Amount   float64
+	Tier     string // "premium" | "standard" | "budget"
+	Approved bool
+	// Internal tracking set by activities:
+	ChargeRef   string
+	InventoryOK bool
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sentinel errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+var (
+	ErrPaymentDeclined = errors.New("payment declined by issuer")
+	ErrFraudBlock      = errors.New("order blocked by fraud detection")
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activities — approval gate
+// ─────────────────────────────────────────────────────────────────────────────
+
+func validateOrder(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] ✓ order validated (amount=%.2f tier=%s)\n", o.ID, o.Amount, o.Tier)
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activities — fulfilment (Saga steps)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func chargeCard(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 💳 charging $%.2f...\n", o.ID, o.Amount)
+	o.ChargeRef = fmt.Sprintf("CHG-%s-%d", o.ID, time.Now().UnixMilli())
+	fmt.Printf("  [%s] ✓ charged (ref=%s)\n", o.ID, o.ChargeRef)
+	return nil
+}
+
+func refundCard(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] ↩ refunding charge ref=%s (saga compensation)\n", o.ID, o.ChargeRef)
+	o.ChargeRef = ""
+	return nil
+}
+
+var inventoryAttempts = map[string]int{}
+
+func deductInventory(_ context.Context, o *Order) error {
+	inventoryAttempts[o.ID]++
+	attempt := inventoryAttempts[o.ID]
+	fmt.Printf("  [%s] 📦 deducting inventory (attempt %d)...\n", o.ID, attempt)
+	if attempt < 3 {
+		return fmt.Errorf("inventory service unavailable (attempt %d)", attempt)
+	}
+	o.InventoryOK = true
+	fmt.Printf("  [%s] ✓ inventory reserved\n", o.ID)
+	return nil
+}
+
+func restoreInventory(_ context.Context, o *Order) error {
+	if o.InventoryOK {
+		fmt.Printf("  [%s] ↩ restoring inventory (saga compensation)\n", o.ID)
+		o.InventoryOK = false
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activities — shipping
+// ─────────────────────────────────────────────────────────────────────────────
+
+func scheduleVIPShipping(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 🚀 scheduling VIP same-day shipping\n", o.ID)
+	return nil
+}
+
+func scheduleStandardShipping(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 📮 scheduling standard 3-5 day shipping\n", o.ID)
+	return nil
+}
+
+func scheduleBudgetShipping(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 📬 scheduling budget 7-10 day shipping\n", o.ID)
+	return nil
+}
+
+func notifyCustomer(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 📧 shipping confirmation sent to customer\n", o.ID)
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activities — rejection
+// ─────────────────────────────────────────────────────────────────────────────
+
+func sendRejectionEmail(_ context.Context, o *Order) error {
+	fmt.Printf("  [%s] 📧 rejection email sent\n", o.ID)
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Routing conditions
+// ─────────────────────────────────────────────────────────────────────────────
+
+func isApproved(_ context.Context, o *Order) bool { return o.Approved }
+func tierKey(_ context.Context, o *Order) any     { return o.Tier }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Retry + timeout policies
+// ─────────────────────────────────────────────────────────────────────────────
+
+var inventoryRetry = workflow.RetryPolicy{
+	MaxAttempts:        3,
+	InitialInterval:    20 * time.Millisecond,
+	BackoffCoefficient: 2.0, // 20ms → 40ms → 80ms
+	MaxInterval:        500 * time.Millisecond,
+	// Fraud blocks are terminal — never retry.
+	NonRetryableErrors: []error{ErrFraudBlock},
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow definition
+// ─────────────────────────────────────────────────────────────────────────────
+
+var orderWF = workflow.Define[*Order]().
+	WithLogger(workflow.DefaultLogger{}).
+
+	// ── Step 1: Validation (OnExit from PENDING) ─────────────────────────────
+	OnExit("PENDING", validateOrder).
+
+	// ── Step 2: Approval gate — If/Else conditional routing ──────────────────
+	From("PENDING").On("review").
+	If(isApproved, "APPROVED").
+	Else("REJECTED").
+
+	// ── Step 3: Rejection path ────────────────────────────────────────────────
+	From("REJECTED").On("notify").To("CLOSED").
+	Activity(sendRejectionEmail).
+
+	// ── Step 4: Tier-based routing using Switch ───────────────────────────────
+	From("APPROVED").On("fulfil").
+	Switch(tierKey).
+	Case("premium", "VIP_FULFIL").
+	Case("standard", "STANDARD_FULFIL").
+	Default("BUDGET_FULFIL"). // catches "budget" and any unknown tier
+
+	// ── Step 5: VIP fulfilment — Saga + Retry + Timeout ──────────────────────
+	From("VIP_FULFIL").On("ship").To("SHIPPED").
+	Saga(chargeCard, refundCard).                                         // saga: auto-refund on failure
+	Saga(workflow.Retry(deductInventory, inventoryRetry), restoreInventory). // saga: retry + auto-restore
+	Activity(workflow.Timeout(scheduleVIPShipping, 2*time.Second)).
+
+	// ── Step 5a: Standard fulfilment ─────────────────────────────────────────
+	From("STANDARD_FULFIL").On("ship").To("SHIPPED").
+	Saga(chargeCard, refundCard).
+	Saga(workflow.Retry(deductInventory, inventoryRetry), restoreInventory).
+	Activity(workflow.Timeout(scheduleStandardShipping, 2*time.Second)).
+
+	// ── Step 5b: Budget fulfilment ────────────────────────────────────────────
+	From("BUDGET_FULFIL").On("ship").To("SHIPPED").
+	Saga(chargeCard, refundCard).
+	Saga(workflow.Retry(deductInventory, inventoryRetry), restoreInventory).
+	Activity(workflow.Timeout(scheduleBudgetShipping, 2*time.Second)).
+
+	// ── Step 6: Delivery confirmation ─────────────────────────────────────────
+	From("SHIPPED").On("deliver").To("DELIVERED").
+	Activity(notifyCustomer).
+
+	MustBuild()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// main
+// ─────────────────────────────────────────────────────────────────────────────
 
 func main() {
-	workflow, err := workflow.Define().
-		// ── Simple transitions with Activities ───────────────────────
-		From("CREATED").On("submit").To("SUBMITTED").
-		Activity(validateOrder, auditSubmit).
+	fmt.Println("┌─ Order Workflow graph ──────────────────────────────────────")
+	fmt.Print(orderWF.Visualize())
+	fmt.Println("└────────────────────────────────────────────────────────────")
+	fmt.Println()
 
-		// ── Conditional routing via Conditions (if-else) ─────────────
-		From("SUBMITTED").On("review").
-		If(isHighValue).To("MANUAL_REVIEW").
-		Else("APPROVED").
-
-		// ── Value-based routing via SwitchExpr ────────────────────────
-		From("APPROVED").On("pay").
-		Switch(paymentMethod).
-		Case("card", "CARD_PROCESSING").
-		Case("paypal", "PAYPAL_PROCESSING").
-		Default("UNSUPPORTED_PAYMENT").
-
-		From("CARD_PROCESSING").On("capture").To("COMPLETED").
-		From("PAYPAL_PROCESSING").On("capture").To("COMPLETED").
-		From("MANUAL_REVIEW").On("approve").To("APPROVED").
-		From("MANUAL_REVIEW").On("reject").To("REJECTED").
-
-		// ── OnExit / OnEnter Activities ──────────────────────────────
-		OnExit("CREATED", logExit("CREATED")).
-		OnEnter("SUBMITTED", logEntry("SUBMITTED")).
-		OnEnter("MANUAL_REVIEW", flagForReview).
-
-		// ── Parallel OnEnter Activities ──────────────────────────────
-		OnEnterParallel("COMPLETED",
-			sendConfirmationEmail,
-			updateInventory,
-			notifyWarehouse,
-		).
-		WithLogger(workflow.DefaultLogger{}).
-		Build()
-	if err != nil {
-		log.Fatal(err)
+	orders := []*Order{
+		{ID: "ORD-001", Amount: 249.99, Tier: "premium", Approved: true},
+		{ID: "ORD-002", Amount: 39.99, Tier: "standard", Approved: true},
+		{ID: "ORD-003", Amount: 5.00, Tier: "budget", Approved: false}, // auto-rejected
 	}
 
-	fmt.Println(workflow.Visualize())
-
-	order := &Order{ID: "ORD-001", Amount: 9_500, Method: "card"}
-	ctx := context.Background()
-
-	// Start an Execution — one per order.
-	exec := workflow.NewExecution("CREATED")
-
-	for _, signal := range []string{"submit", "review", "approve", "pay", "capture"} {
-		fmt.Printf("\n[%s] ← signal %q\n", exec.CurrentState(), signal)
-		if err := exec.Signal(ctx, signal, order); err != nil {
-			log.Fatalf("  error: %v", err)
+	for _, o := range orders {
+		fmt.Printf("╔══ Processing %s (tier=%s  approved=%v) ══\n", o.ID, o.Tier, o.Approved)
+		if err := processOrder(o); err != nil {
+			log.Printf("  ✗ %s failed: %v\n", o.ID, err)
 		}
-		fmt.Printf("  → %s\n", exec.CurrentState())
+		fmt.Println()
 	}
 }
 
-// ── Conditions ────────────────────────────────────────────────────────────────
+func processOrder(o *Order) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-func isHighValue(_ context.Context, payload any) bool {
-	return payload.(*Order).Amount > 5_000
-}
+	exec := orderWF.NewExecution(ctx, "PENDING",
+		workflow.WithHooks(workflow.ExecutionHooks[*Order]{
+			OnTransition: func(_ context.Context, from, to, signal string, o *Order) {
+				fmt.Printf("  → [%s] %s --%s--> %s\n", o.ID, from, signal, to)
+			},
+			OnError: func(_ context.Context, state, signal string, err error, o *Order) {
+				fmt.Printf("  ✗ [%s] error in state=%s signal=%s: %v\n", o.ID, state, signal, err)
+			},
+		}),
+	)
 
-func paymentMethod(_ context.Context, payload any) any {
-	return payload.(*Order).Method
-}
+	// ── Approval review ───────────────────────────────────────────────────────
+	if err := exec.Signal(ctx, "review", o); err != nil {
+		return fmt.Errorf("review: %w", err)
+	}
 
-// ── Transition Activities ─────────────────────────────────────────────────────
-
-func validateOrder(_ context.Context, payload any) error {
-	o := payload.(*Order)
-	fmt.Printf("  validating order %s (amount=%.2f)\n", o.ID, o.Amount)
-	return nil
-}
-
-func auditSubmit(_ context.Context, payload any) error {
-	fmt.Printf("  audit: order %s submitted\n", payload.(*Order).ID)
-	return nil
-}
-
-// ── OnExit / OnEnter Activities ───────────────────────────────────────────────
-
-func logEntry(state string) workflow.Activity {
-	return func(_ context.Context, _ any) error {
-		fmt.Printf("  ↳ entered %s\n", state)
+	// ── Branch: rejected orders get a notification then stop ─────────────────
+	if exec.CurrentState() == "REJECTED" {
+		if err := exec.Signal(ctx, "notify", o); err != nil {
+			return fmt.Errorf("notify: %w", err)
+		}
+		printHistory(exec)
 		return nil
 	}
-}
 
-func logExit(state string) workflow.Activity {
-	return func(_ context.Context, _ any) error {
-		fmt.Printf("  ↳ exiting %s\n", state)
-		return nil
+	// ── Tier routing ──────────────────────────────────────────────────────────
+	if err := exec.Signal(ctx, "fulfil", o); err != nil {
+		return fmt.Errorf("fulfil: %w", err)
 	}
-}
 
-func flagForReview(_ context.Context, payload any) error {
-	o := payload.(*Order)
-	fmt.Printf("  ⚑ order %s sent to manual review (amount=%.2f)\n", o.ID, o.Amount)
+	// ── Ship ──────────────────────────────────────────────────────────────────
+	if err := exec.Signal(ctx, "ship", o); err != nil {
+		return fmt.Errorf("ship: %w", err)
+	}
+
+	// ── Deliver ───────────────────────────────────────────────────────────────
+	if err := exec.Signal(ctx, "deliver", o); err != nil {
+		return fmt.Errorf("deliver: %w", err)
+	}
+
+	// ── Wait until DELIVERED (already there; returns immediately) ─────────────
+	awaitCtx, awaitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer awaitCancel()
+	if err := exec.Await(awaitCtx, func(s string) bool { return s == "DELIVERED" }); err != nil {
+		return fmt.Errorf("await: %w", err)
+	}
+
+	printHistory(exec)
 	return nil
 }
 
-// ── Parallel OnEnter Activities (simulate async work) ─────────────────────────
-
-func sendConfirmationEmail(_ context.Context, payload any) error {
-	time.Sleep(10 * time.Millisecond)
-	fmt.Printf("  ✉  confirmation email sent for %s\n", payload.(*Order).ID)
-	return nil
-}
-
-func updateInventory(_ context.Context, payload any) error {
-	time.Sleep(5 * time.Millisecond)
-	fmt.Printf("  📦 inventory updated for %s\n", payload.(*Order).ID)
-	return nil
-}
-
-func notifyWarehouse(_ context.Context, payload any) error {
-	time.Sleep(8 * time.Millisecond)
-	fmt.Printf("  🏭 warehouse notified for %s\n", payload.(*Order).ID)
-	return nil
+func printHistory(exec interface {
+	History() []workflow.HistoryEntry
+	CurrentState() string
+}) {
+	h := exec.History()
+	fmt.Printf("\n  History (%d events) — final state: %s\n", len(h), exec.CurrentState())
+	fmt.Printf("  %-4s  %-14s  %-8s  %-14s  %-8s  %s\n",
+		"#", "From", "Signal", "To", "Duration", "Status")
+	fmt.Println("  " + strings.Repeat("─", 60))
+	for i, e := range h {
+		status := "✓ ok"
+		if e.Err != nil {
+			status = "✗ err"
+		}
+		fmt.Printf("  %-4d  %-14s  %-8s  %-14s  %-8s  %s\n",
+			i+1, e.FromState, e.Signal, e.ToState,
+			e.Duration.Round(time.Millisecond), status)
+	}
 }

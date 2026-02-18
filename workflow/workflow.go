@@ -8,34 +8,31 @@ import (
 	"sync"
 )
 
-// Workflow is an immutable, compiled state machine definition — analogous to a
-// Temporal Workflow Definition. Build one with Define().Build() or
-// Define().MustBuild(), then share it freely across goroutines.
+// Workflow is the immutable, compiled state graph — the go-statemachine equivalent
+// of a Temporal Workflow Definition. Build it once with Define() and share it
+// freely across goroutines; all mutable per-execution state lives in Execution.
 //
-// The Workflow itself holds no state. Call NewExecution to create a stateful
-// Execution, or call Signal directly for a fully stateless interaction.
-type Workflow struct {
-	routes     map[string]map[string]*route // state → signal → compiled route
-	entryHooks map[string][]hookGroup       // state → ordered OnEnter Activity groups
-	exitHooks  map[string][]hookGroup       // state → ordered OnExit Activity groups
+// Use NewExecution to create a stateful instance for a single entity.
+type Workflow[T any] struct {
+	routes     map[string]map[string]*route[T]
+	entryHooks map[string][]hookGroup[T]
+	exitHooks  map[string][]hookGroup[T]
 	logger     Logger
 }
 
-// Signal is the stateless API. It resolves the destination state and runs all
-// Activities for the given (currentState, signal) pair, then returns the new state.
+// Signal drives the workflow from currentState via signal, returning the new state.
+// It is stateless: the caller is responsible for persisting the returned state.
 //
-// Execution order:
-//  1. Resolve destination (evaluate Conditions / SwitchExpr)
-//  2. Log the transition
-//  3. Run OnExit Activities for currentState (sequential groups, then parallel groups)
-//  4. Run transition Activities (sequential)
-//  5. Run OnEnter Activities for the destination state
-//  6. Return the new state
+// Execution order for a successful transition:
+//  1. Resolve destination state (evaluate conditions/switch if needed).
+//  2. Log the transition.
+//  3. Run OnExit hooks for currentState.
+//  4. Run transition Activities (with Saga compensation on failure).
+//  5. Run OnEnter hooks for the new state.
 //
-// On any error before state change the original state is returned unchanged.
-// An OnEnter failure returns the new state alongside the error because the
-// transition already resolved — callers may choose to treat this as a partial success.
-func (w *Workflow) Signal(ctx context.Context, currentState, signal string, payload any) (string, error) {
+// On error the state is always returned alongside the error so callers know
+// the effective state even when a late hook fails.
+func (w *Workflow[T]) Signal(ctx context.Context, currentState, signal string, payload T) (string, error) {
 	signals, ok := w.routes[currentState]
 	if !ok {
 		return currentState, fmt.Errorf("%w: state=%q signal=%q", ErrUnknownSignal, currentState, signal)
@@ -50,29 +47,48 @@ func (w *Workflow) Signal(ctx context.Context, currentState, signal string, payl
 		return currentState, err
 	}
 
+	if err := w.runHooks(ctx, w.exitHooks[currentState], payload); err != nil {
+		return currentState, fmt.Errorf("OnExit hook failed for state=%q: %w", currentState, err)
+	}
+
+	if err := w.executeSteps(ctx, r, payload); err != nil {
+		return currentState, err
+	}
+
+	// State is now dst; log only once the transition cannot be rolled back.
 	if w.logger != nil {
 		w.logger.LogTransition(currentState, signal, dst)
 	}
 
-	if err := w.runHooks(ctx, w.exitHooks[currentState], payload); err != nil {
-		return currentState, fmt.Errorf("OnExit activity failed for state=%q: %w", currentState, err)
-	}
-
-	for _, a := range r.activities {
-		if err := a(ctx, payload); err != nil {
-			return currentState, fmt.Errorf("transition activity failed: %w", err)
-		}
-	}
-
+	// OnEnter failure returns dst so callers know the state has already changed.
 	if err := w.runHooks(ctx, w.entryHooks[dst], payload); err != nil {
-		return dst, fmt.Errorf("OnEnter activity failed for state=%q: %w", dst, err)
+		return dst, fmt.Errorf("OnEnter hook failed for state=%q: %w", dst, err)
 	}
 
 	return dst, nil
 }
 
-// resolve determines the destination state from the compiled route.
-func (w *Workflow) resolve(ctx context.Context, r *route, payload any) (string, error) {
+// executeSteps runs each step in order. On failure it runs Saga compensations
+// in reverse for every previously-completed step that carries one.
+func (w *Workflow[T]) executeSteps(ctx context.Context, r *route[T], payload T) error {
+	executed := make([]int, 0, len(r.steps))
+	for i, s := range r.steps {
+		if err := s.activity(ctx, payload); err != nil {
+			// Compensate in reverse order (best-effort; errors are suppressed).
+			for j := len(executed) - 1; j >= 0; j-- {
+				if comp := r.steps[executed[j]].compensate; comp != nil {
+					_ = comp(ctx, payload)
+				}
+			}
+			return fmt.Errorf("activity[%d] failed: %w", i, err)
+		}
+		executed = append(executed, i)
+	}
+	return nil
+}
+
+// resolve determines the destination state from the route definition.
+func (w *Workflow[T]) resolve(ctx context.Context, r *route[T], payload T) (string, error) {
 	switch r.kind {
 	case routeSimple:
 		return r.dst, nil
@@ -105,9 +121,9 @@ func (w *Workflow) resolve(ctx context.Context, r *route, payload any) (string, 
 	}
 }
 
-// runHooks executes the ordered hookGroups for a state. Sequential groups run
-// one Activity at a time; concurrent groups fan out with goroutines.
-func (w *Workflow) runHooks(ctx context.Context, groups []hookGroup, payload any) error {
+// runHooks executes all hookGroups for a state entry or exit.
+// Groups are executed sequentially; within a group Activities may be concurrent.
+func (w *Workflow[T]) runHooks(ctx context.Context, groups []hookGroup[T], payload T) error {
 	for _, g := range groups {
 		if !g.concurrent {
 			for _, a := range g.activities {
@@ -125,7 +141,7 @@ func (w *Workflow) runHooks(ctx context.Context, groups []hookGroup, payload any
 		)
 		for _, a := range g.activities {
 			wg.Add(1)
-			go func(act Activity) {
+			go func(act Activity[T]) {
 				defer wg.Done()
 				if err := act(ctx, payload); err != nil {
 					mu.Lock()
@@ -144,15 +160,28 @@ func (w *Workflow) runHooks(ctx context.Context, groups []hookGroup, payload any
 	return nil
 }
 
-// NewExecution creates a new Execution backed by this Workflow, starting in
-// initialState — analogous to starting a new Temporal Workflow Execution.
-func (w *Workflow) NewExecution(initialState string) *Execution {
-	return &Execution{workflow: w, state: initialState}
+// NewExecution creates a stateful Execution that tracks the current state
+// and event history for a single entity.
+//
+// ctx is the lifecycle context for the entire Execution; cancelling it
+// prevents future Signals from running (see Execution.Cancel).
+func (w *Workflow[T]) NewExecution(ctx context.Context, initialState string, opts ...ExecutionOption[T]) *Execution[T] {
+	ctx, cancel := context.WithCancel(ctx)
+	e := &Execution[T]{
+		workflow:  w,
+		state:     initialState,
+		cancelCtx: ctx,
+		cancelFn:  cancel,
+	}
+	e.cond = sync.NewCond(&e.mu)
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
-// AvailableSignals returns the signals that can be received in the given state,
-// sorted alphabetically.
-func (w *Workflow) AvailableSignals(state string) []string {
+// AvailableSignals returns the signals accepted in state, sorted alphabetically.
+func (w *Workflow[T]) AvailableSignals(state string) []string {
 	sigs := make([]string, 0, len(w.routes[state]))
 	for s := range w.routes[state] {
 		sigs = append(sigs, s)
@@ -161,9 +190,8 @@ func (w *Workflow) AvailableSignals(state string) []string {
 	return sigs
 }
 
-// States returns all states that have at least one outgoing signal registered,
-// sorted alphabetically.
-func (w *Workflow) States() []string {
+// States returns all states that have at least one outgoing transition, sorted.
+func (w *Workflow[T]) States() []string {
 	states := make([]string, 0, len(w.routes))
 	for s := range w.routes {
 		states = append(states, s)
@@ -172,12 +200,11 @@ func (w *Workflow) States() []string {
 	return states
 }
 
-// Visualize returns a human-readable diagram of the Workflow's state transitions.
-func (w *Workflow) Visualize() string {
+// Visualize returns a human-readable text representation of the workflow graph.
+func (w *Workflow[T]) Visualize() string {
 	if len(w.routes) == 0 {
-		return "(empty workflow)"
+		return "(empty workflow)\n"
 	}
-
 	var sb strings.Builder
 	sb.WriteString("Workflow:\n")
 	for _, state := range w.States() {
@@ -190,7 +217,7 @@ func (w *Workflow) Visualize() string {
 	return sb.String()
 }
 
-func routeLabel(r *route) string {
+func routeLabel[T any](r *route[T]) string {
 	switch r.kind {
 	case routeSimple:
 		return r.dst
@@ -212,6 +239,7 @@ func routeLabel(r *route) string {
 			dsts = append(dsts, r.defaultDst+" (default)")
 		}
 		return "[" + strings.Join(dsts, " | ") + "]"
+	default:
+		return "?"
 	}
-	return "?"
 }

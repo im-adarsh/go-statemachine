@@ -2,15 +2,24 @@ package workflow
 
 import "errors"
 
-// Sentinel errors returned by Workflow.Signal and Execution.Signal.
-// Use errors.Is(err, workflow.ErrUnknownSignal) to test for specific failures.
+// Sentinel errors returned by Workflow and Execution methods.
+// Use errors.Is() for matching:
+//
+//	if errors.Is(err, workflow.ErrRetryExhausted) { ... }
 var (
 	// ErrUnknownSignal is returned when no transition is registered for the
-	// current state + signal pair — analogous to sending a Signal to a Temporal
-	// Workflow Execution that has no handler for it.
+	// given signal in the current state.
 	ErrUnknownSignal = errors.New("unknown signal for current state")
 
-	// ErrNoConditionMatched is returned when all Conditions in an if-else chain
-	// fail with no Else clause, or a switch has no matching Case and no Default.
+	// ErrNoConditionMatched is returned when a conditional (if-else or switch)
+	// route is evaluated but no branch matches and no else/default clause is defined.
 	ErrNoConditionMatched = errors.New("no condition matched and no else/default clause defined")
+
+	// ErrRetryExhausted is returned by Retry() when all retry attempts are
+	// exhausted and the Activity still returns an error.
+	ErrRetryExhausted = errors.New("retry attempts exhausted")
+
+	// ErrExecutionCancelled is returned by Execution.Signal when the Execution
+	// has already been cancelled via Execution.Cancel().
+	ErrExecutionCancelled = errors.New("execution has been cancelled")
 )
