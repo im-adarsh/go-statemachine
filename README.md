@@ -1,404 +1,446 @@
 # go-statemachine
 
-A minimal, production-ready **finite state machine** library for Go. Define states, events, and transitions with optional lifecycle hooks—ideal for order workflows, approval flows, and any state-driven logic.
+[![Go Reference](https://pkg.go.dev/badge/github.com/im-adarsh/go-workflow.svg)](https://pkg.go.dev/github.com/im-adarsh/go-statemachine)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-%3E%3D1.21-00ADD8)](go.mod)
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/im-adarsh/go-statemachine.svg)](https://pkg.go.dev/github.com/im-adarsh/go-statemachine/statemachine)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+A stateless, fluent state machine for Go that borrows Temporal's vocabulary:
+**Workflows**, **Executions**, **Signals**, and **Activities**.
 
-Inspired by [Tinder/StateMachine](https://github.com/Tinder/StateMachine).
+```go
+// Define the Workflow once — immutable, shareable, zero state.
+workflow, _ := workflow.Define().
+    From("PENDING").On("approve").To("APPROVED").Activity(sendApprovalEmail).
+    From("PENDING").On("reject").To("REJECTED").
+    From("APPROVED").On("ship").To("SHIPPED").
+    OnEnterParallel("SHIPPED", updateInventory, notifyWarehouse).
+    Build()
+
+// Start an Execution per entity.
+exec := workflow.NewExecution("PENDING")
+exec.Signal(ctx, "approve", myOrder)
+fmt.Println(exec.CurrentState()) // "APPROVED"
+```
 
 ---
 
-## Table of contents
+## Table of Contents
 
+- [Concept mapping](#concept-mapping)
 - [Features](#features)
-- [Requirements](#requirements)
 - [Installation](#installation)
-- [Concepts](#concepts)
-- [Quick start](#quick-start)
+- [Quick Start](#quick-start)
+- [Conditional Routing](#conditional-routing)
+  - [If / ElseIf / Else (Conditions)](#if--elseif--else-conditions)
+  - [Switch / Case / Default (SwitchExpr)](#switch--case--default-switchexpr)
+- [Activities](#activities)
+  - [Transition Activities](#transition-activities)
+  - [OnEnter / OnExit Activities](#onenter--onexit-activities)
+  - [Parallel Activities](#parallel-activities)
+- [Execution](#execution)
+- [Stateless vs Stateful](#stateless-vs-stateful)
+- [Visualization](#visualization)
+- [Error Handling](#error-handling)
+- [Logging](#logging)
 - [Examples](#examples)
-- [Lifecycle hooks](#lifecycle-hooks)
-- [Error handling](#error-handling)
-- [Configuration](#configuration)
-- [API overview](#api-overview)
-- [Testing](#testing)
-- [License](#license)
+- [API Reference](#api-reference)
+
+---
+
+## Concept Mapping
+
+| Temporal | go-statemachine | Description |
+|---|---|---|
+| Workflow Definition | `Workflow` | Immutable, compiled state graph. Build once, share freely. |
+| Workflow Execution | `Execution` | One live instance per entity. Tracks current state. Thread-safe. |
+| Signal | `signal` string + `Execution.Signal()` | Event that drives an Execution to the next state. |
+| Activity | `Activity` (`func(ctx, payload) error`) | Unit of work: transition actions, OnEnter/OnExit hooks. |
+| Condition / Guard | `Condition` (`func(ctx, payload) bool`) | Predicate for if-else routing. |
+| — | `SwitchExpr` (`func(ctx, payload) any`) | Extracts the routing key for switch-case routing. |
+| Query | `Execution.CurrentState()` | Read-only inspection of the current state. |
+
+The key difference from Temporal: this library is **in-process and stateless**. There
+is no server, no persistence, no durability — just a fast, zero-dependency state router.
 
 ---
 
 ## Features
 
-| Feature | Description |
-|--------|-------------|
-| **Simple API** | Define transitions as (source state(s), event, destination state). No code generation. |
-| **Lifecycle hooks** | `BeforeTransition`, `Transition`, `AfterTransition`, `OnSuccess`, `OnFailure`—all optional. |
-| **Guard conditions** | Conditional transitions: only execute if `Guard` returns true (e.g., balance check). |
-| **Conditional flow charts** | Multiple transitions from same (state, event) with different guards—first matching guard wins. |
-| **If-else blocks** | `AddConditionBlock` for if-else flow chart patterns—conditions evaluated in order, first match executes. |
-| **Switch blocks** | `AddSwitchBlock` for switch-case flow chart patterns—match a value and route to different transitions. |
-| **Concurrent execution** | Run state entry/exit handlers concurrently for better performance (`AddStateEntryConcurrent`, `AddStateExitConcurrent`). |
-| **Parallel transitions** | `TriggerParallelTransitions` to execute multiple transitions concurrently. |
-| **State callbacks** | `AddStateEntry` and `AddStateExit` for actions when entering/exiting states. |
-| **Thread-safe** | Safe for concurrent use with multiple goroutines (mutex-protected). |
-| **Handler return values** | Handlers may return an updated model; the machine uses it for subsequent steps and as the final result. |
-| **Sentinel errors** | Use `errors.Is(err, statemachine.ErrUndefinedTransition)` and similar for robust error handling. |
-| **ErrIgnore** | Return `statemachine.ErrIgnore` from `OnFailure` to swallow the error and abort the transition **without** changing state. |
-| **Configurable logging** | Plug in a custom `Logger` or use `NoopLogger{}` to disable logs. |
-| **Visualize** | Print a text diagram of the state machine for docs or debugging. |
-
----
-
-## Requirements
-
-- **Go 1.21+**
+- **Temporal vocabulary** — Workflows, Executions, Signals, Activities
+- **Fluent builder** — transitions read like a specification
+- **Stateless core** — `Workflow.Signal` takes a state, returns a state; no side effects
+- **Execution wrapper** — optional thread-safe stateful layer for convenience  
+- **Conditional routing** — If/ElseIf/Else Conditions and Switch/Case/Default SwitchExprs
+- **Activities** — sequential or parallel; any error aborts the transition
+- **OnEnter / OnExit** — state lifecycle hooks as ordinary Activities
+- **Visualization** — human-readable diagram with `Workflow.Visualize()`
+- **Pluggable logger** — implement one interface method
+- **Zero dependencies** — standard library only
 
 ---
 
 ## Installation
 
 ```bash
-go get github.com/im-adarsh/go-statemachine/statemachine
+go get github.com/im-adarsh/go-statemachine
 ```
 
-```go
-import "github.com/im-adarsh/go-statemachine/statemachine"
-```
+Requires **Go 1.21+**.
 
 ---
 
-## Concepts
-
-- **State** — A value (e.g. `"PENDING"`, `"SHIPPED"`) held by your model.
-- **Event** — A trigger (e.g. `"Submit"`, `"Ship"`) supplied when firing a transition.
-- **Transition** — A rule: from one or more source states, on an event, move to a destination state. You can attach optional hooks to each transition.
-- **Model** — Your struct that implements `TransitionModel` (`GetState` / `SetState`). The machine reads and updates its state.
-- **Event key** — The pair `(SourceState, Event)` that uniquely identifies which transition to run.
-
----
-
-## Quick start
+## Quick Start
 
 ```go
 package main
 
 import (
-	"context"
-	"fmt"
+    "context"
+    "fmt"
+    "log"
 
-	"github.com/im-adarsh/go-statemachine/statemachine"
+    "github.com/im-adarsh/go-statemachine/workflow"
 )
 
-type Order struct{ Status string }
-
-func (o *Order) SetState(s statemachine.State) { o.Status = string(s) }
-func (o *Order) GetState() statemachine.State   { return statemachine.State(o.Status) }
-
 func main() {
-	sm := statemachine.NewStatemachine(statemachine.EventKey{Src: "DRAFT", Event: "submit"})
-	sm.AddTransition(statemachine.Transition{
-		Src: []statemachine.State{"DRAFT"}, Event: "submit", Dst: "PENDING",
-	})
+    // 1. Define the Workflow (do this once at startup).
+    workflow, err := workflow.Define().
+        From("CREATED").On("submit").To("SUBMITTED").Activity(validateForm).
+        From("SUBMITTED").On("approve").To("APPROVED").
+        From("SUBMITTED").On("reject").To("REJECTED").
+        From("APPROVED").On("ship").To("SHIPPED").
+        OnEnter("SHIPPED", sendConfirmation).
+        OnExit("CREATED", auditLog).
+        Build()
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	order := &Order{Status: "DRAFT"}
-	_, err := sm.TriggerTransition(context.Background(), event("submit"), order)
-	if err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	fmt.Println("status:", order.Status) // PENDING
+    fmt.Println(workflow.Visualize())
+
+    // 2. Start one Execution per entity.
+    ctx := context.Background()
+    exec := workflow.NewExecution("CREATED")
+
+    exec.Signal(ctx, "submit", myOrder)
+    exec.Signal(ctx, "approve", myOrder)
+    exec.Signal(ctx, "ship", myOrder)
+
+    fmt.Println(exec.CurrentState()) // "SHIPPED"
+}
+```
+
+---
+
+## Conditional Routing
+
+### If / ElseIf / Else (Conditions)
+
+A `Condition` is a predicate evaluated in order; the first `true` wins.
+`Else` handles the fallback. Without `Else`, `ErrNoConditionMatched` is returned.
+
+```go
+isHighValue   := func(_ context.Context, p any) bool { return p.(*Order).Amount > 5000 }
+isMediumValue := func(_ context.Context, p any) bool { return p.(*Order).Amount > 1000 }
+
+workflow, _ := workflow.Define().
+    From("SUBMITTED").On("review").
+        If(isHighValue).To("MANUAL_REVIEW").
+        ElseIf(isMediumValue).To("STANDARD_REVIEW").
+        Else("AUTO_APPROVED").
+    Build()
+```
+
+### Switch / Case / Default (SwitchExpr)
+
+A `SwitchExpr` extracts a routing key; `Case` values are compared with `==`.
+`Default` handles unmatched values. Without `Default`, `ErrNoConditionMatched` is returned.
+
+```go
+paymentMethod := func(_ context.Context, p any) any {
+    return p.(*Order).Method
 }
 
-type event string
-func (e event) GetEvent() statemachine.Event { return statemachine.Event(e) }
+workflow, _ := workflow.Define().
+    From("APPROVED").On("pay").
+        Switch(paymentMethod).
+        Case("card",   "CARD_PROCESSING").
+        Case("paypal", "PAYPAL_PROCESSING").
+        Default("UNSUPPORTED_PAYMENT").
+    Build()
+```
+
+---
+
+## Activities
+
+An `Activity` is `func(ctx context.Context, payload any) error` — the same signature
+for transition activities and state hooks. This mirrors Temporal's Activity concept:
+an isolated, retryable unit of work.
+
+### Transition Activities
+
+Run after OnExit and before OnEnter. If any Activity returns an error, the transition
+is **aborted** and the state is unchanged.
+
+```go
+workflow, _ := workflow.Define().
+    From("DRAFT").On("submit").To("REVIEW").
+        Activity(validateForm, enrichMetadata, indexDocument).
+    Build()
+```
+
+Multiple `Activity()` calls on the same transition append to the same sequential list:
+
+```go
+.Activity(a).Activity(b, c)   // equivalent to .Activity(a, b, c)
+```
+
+### OnEnter / OnExit Activities
+
+Registered per state, called regardless of which Signal triggered the transition.
+
+```go
+workflow, _ := workflow.Define().
+    From("A").On("go").To("B").
+    OnExit("A",  auditExit, releaseResources).
+    OnEnter("B", initState, sendNotification).
+    Build()
+```
+
+**Execution order for every Signal:**
+
+```
+OnExit Activities (current state)   ← sequential, in registration order
+    → Transition Activities         ← sequential, in registration order
+        → OnEnter Activities        ← sequential (or parallel — see below)
+```
+
+### Parallel Activities
+
+Activities within a single `OnEnterParallel` / `OnExitParallel` call run concurrently.
+All goroutines are awaited; the first error is returned.
+
+```go
+workflow, _ := workflow.Define().
+    From("APPROVED").On("complete").To("DONE").
+    OnEnterParallel("DONE",
+        sendEmail,       // ┐
+        updateDatabase,  // ├─ run concurrently
+        notifyAnalytics, // ┘
+    ).
+    Build()
+```
+
+Mix sequential and parallel groups on the same state — they run in registration order,
+one group at a time:
+
+```go
+OnEnter("B", setupState).              // sequential first
+OnEnterParallel("B", notify, index).   // then these two in parallel
+OnEnter("B", finalAudit)               // then this last
+```
+
+---
+
+## Execution
+
+`Execution` wraps a `Workflow` and tracks the current state. It is safe for concurrent use.
+
+```go
+exec := workflow.NewExecution("PENDING") // start in PENDING
+
+exec.Signal(ctx, "approve", order)       // drive to next state
+exec.CurrentState()                       // read current state (Query)
+exec.CanReceive("ship")                   // true if signal is valid right now
+exec.SetState("PENDING")                  // override state (no Activities run)
+```
+
+`Signal` returns an error on unknown signals, failed Activities, or failed hooks.
+On error the state is **unchanged** — except for OnEnter failures, where the new
+state is retained (the transition already completed) and the error is returned alongside it.
+
+---
+
+## Stateless vs Stateful
+
+| | `Workflow.Signal` | `Execution.Signal` |
+|---|---|---|
+| State tracking | Caller's responsibility | Internal (`sync.Mutex`) |
+| Thread-safe | ✓ (immutable Workflow) | ✓ |
+| Use case | Pure function / event sourcing | One object per entity |
+
+```go
+// Stateless — pass in and receive state explicitly:
+newState, err := workflow.Signal(ctx, currentState, "approve", order)
+
+// Stateful — Execution tracks state internally:
+exec := workflow.NewExecution("PENDING")
+err  := exec.Signal(ctx, "approve", order)
+```
+
+---
+
+## Visualization
+
+```go
+fmt.Println(workflow.Visualize())
+```
+
+```
+Workflow:
+  [APPROVED]
+    --ship--> SHIPPED
+  [PENDING]
+    --approve--> APPROVED
+    --reject-->  REJECTED
+  [SUBMITTED]
+    --review--> [MANUAL_REVIEW | STANDARD_REVIEW | AUTO_APPROVED (else)]
+```
+
+---
+
+## Error Handling
+
+```go
+import "errors"
+
+newState, err := workflow.Signal(ctx, state, signal, payload)
+switch {
+case errors.Is(err, workflow.ErrUnknownSignal):
+    // No transition registered for (state, signal).
+case errors.Is(err, workflow.ErrNoConditionMatched):
+    // If-else with no match and no Else; switch with no match and no Default.
+case err != nil:
+    // Activity or hook returned an error — wrapped with context.
+}
+```
+
+| Sentinel | When |
+|---|---|
+| `ErrUnknownSignal` | No transition registered for (state, signal) |
+| `ErrNoConditionMatched` | Condition chain exhausted with no match and no fallback |
+
+---
+
+## Logging
+
+Implement `Logger` to plug in any logging library:
+
+```go
+type Logger interface {
+    LogTransition(from, signal, to string)
+}
+```
+
+Built-in:
+
+| Type | Behaviour |
+|---|---|
+| `DefaultLogger{}` | Writes to `log.Printf` |
+| `NoopLogger{}` | Discards all output |
+
+```go
+// Zap
+type zapLogger struct{ z *zap.Logger }
+func (l *zapLogger) LogTransition(from, signal, to string) {
+    l.z.Info("signal", zap.String("from", from),
+                        zap.String("signal", signal),
+                        zap.String("to", to))
+}
+
+workflow, _ := workflow.Define().
+    From("A").On("go").To("B").
+    WithLogger(&zapLogger{z: logger}).
+    Build()
 ```
 
 ---
 
 ## Examples
 
-The [examples/](examples/) directory contains runnable programs. Run any of them with:
+| Directory | What it shows |
+|---|---|
+| [`examples/basic`](examples/basic/main.go) | Minimal Workflow + Execution + Logger |
+| [`examples/order`](examples/order/main.go) | Order Workflow: Conditions, SwitchExpr, sequential/parallel Activities |
+| [`examples/flowchart`](examples/flowchart/main.go) | Loan applications: one Workflow, many concurrent Executions |
 
 ```bash
-go run ./examples/<name>/main.go
-```
-
-| Example | Description |
-|--------|-------------|
-| [basic](examples/basic/main.go) | Minimal FSM: one transition, no hooks. |
-| [phase](examples/phase/main.go) | Phase diagram (SOLID ↔ LIQUID ↔ GAS) with before/during/after hooks and visualization. |
-| [error-handling](examples/error-handling/main.go) | Using `errors.Is` for undefined transitions and `ErrIgnore` to abort without changing state. |
-| [custom-logger](examples/custom-logger/main.go) | Disable or customize logging with `WithLogger`. |
-| [guard](examples/guard/main.go) | Conditional transitions using guard conditions (e.g., balance check before withdrawal). |
-| [state-callbacks](examples/state-callbacks/main.go) | State entry and exit callbacks for actions when entering/exiting states. |
-| [conditional-flow](examples/conditional-flow/main.go) | Multiple transitions from same state+event with guards (conditional flow chart). |
-| [concurrent-execution](examples/concurrent-execution/main.go) | Running handlers concurrently for better performance. |
-| [if-else](examples/if-else/main.go) | If-else flow chart pattern using `ConditionBlock`. |
-| [switch](examples/switch/main.go) | Switch-case flow chart pattern using `SwitchBlock`. |
-
----
-
-## Lifecycle hooks
-
-For each transition you can attach optional handlers. Execution order:
-
-1. **BeforeTransition** — Runs before the state change. If it returns an error, the transition is aborted (unless `OnFailure` returns `ErrIgnore`).
-2. **Transition** — The main “during” logic. Same abort rules.
-3. **State update** — The model’s state is set to the destination state.
-4. **AfterTransition** — Runs after the state change. Errors are passed to `OnFailure` if set.
-5. **OnSuccess** — Called when the transition completed without error. Its return value is the final model returned to the caller.
-6. **OnFailure** — Called when any hook returns an error. If it returns `ErrIgnore`, the error is swallowed and the transition is aborted without changing state.
-
-Handlers that return a non-nil `TransitionModel` pass that model to the next step and as the final result.
-
-### Guard conditions
-
-Use `Guard` to make transitions conditional:
-
-```go
-sm.AddTransition(statemachine.Transition{
-    Src: []statemachine.State{"ACTIVE"}, Event: "withdraw", Dst: "ACTIVE",
-    Guard: func(ctx context.Context, e statemachine.TransitionEvent, m statemachine.TransitionModel) (bool, error) {
-        acc := m.(*Account)
-        evt := e.(WithdrawEvent)
-        return acc.Balance >= evt.Amount, nil // Only allow if balance >= amount
-    },
-})
-```
-
-### State entry/exit callbacks
-
-Register callbacks that run when entering or exiting states:
-
-```go
-sm.AddStateEntry("IN_PROGRESS", func(ctx context.Context, m statemachine.TransitionModel) error {
-    task := m.(*Task)
-    task.StartedAt = time.Now().Format(time.RFC3339)
-    return nil
-})
-
-sm.AddStateExit("IN_PROGRESS", func(ctx context.Context, m statemachine.TransitionModel) error {
-    fmt.Println("Leaving IN_PROGRESS state")
-    return nil
-})
-```
-
-### Conditional flow charts
-
-Define multiple transitions from the same (state, event) with different guards. The first matching guard wins:
-
-```go
-// High priority -> fast track
-sm.AddTransition(statemachine.Transition{
-    Src: []statemachine.State{"PENDING"}, Event: "process", Dst: "FAST_TRACK",
-    Guard: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (bool, error) {
-        return m.(*Order).Priority == "high", nil
-    },
-})
-
-// Medium priority -> standard
-sm.AddTransition(statemachine.Transition{
-    Src: []statemachine.State{"PENDING"}, Event: "process", Dst: "STANDARD",
-    Guard: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (bool, error) {
-        return m.(*Order).Priority == "medium", nil
-    },
-})
-
-// Fallback: no guard = always matches if previous guards fail
-sm.AddTransition(statemachine.Transition{
-    Src: []statemachine.State{"PENDING"}, Event: "process", Dst: "SLOW_LANE",
-})
-```
-
-### Concurrent execution
-
-Run handlers concurrently for better performance:
-
-```go
-// Sequential (default)
-sm.AddStateEntry("RUNNING", handler1)
-sm.AddStateEntry("RUNNING", handler2)
-
-// Concurrent - run in parallel
-sm.AddStateEntryConcurrent("RUNNING", handler3)
-sm.AddStateEntryConcurrent("RUNNING", handler4)
-
-// Same for exit handlers
-sm.AddStateExitConcurrent("RUNNING", cleanupHandler)
-```
-
-**Note**: Concurrent handlers must be thread-safe. Use mutexes if handlers modify shared state.
-
-### If-else blocks (flow chart pattern)
-
-Use `AddConditionBlock` for if-else flow chart patterns:
-
-```go
-sm.AddConditionBlock(statemachine.ConditionBlock{
-    Src:   []statemachine.State{"PENDING"},
-    Event: "process",
-    Cases: []statemachine.ConditionCase{
-        // if amount >= 10000
-        {
-            Condition: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (bool, error) {
-                return m.(*Order).Amount >= 10000, nil
-            },
-            Transition: statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "PREMIUM"},
-        },
-        // else if amount >= 1000
-        {
-            Condition: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (bool, error) {
-                return m.(*Order).Amount >= 1000, nil
-            },
-            Transition: statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "STANDARD"},
-        },
-    },
-    // else
-    ElseTransition: &statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "BASIC"},
-})
-```
-
-Conditions are evaluated in order; first match executes. `ElseTransition` executes if all conditions fail.
-
-### Switch blocks (flow chart pattern)
-
-Use `AddSwitchBlock` for switch-case flow chart patterns:
-
-```go
-sm.AddSwitchBlock(statemachine.SwitchBlock{
-    Src:   []statemachine.State{"PENDING"},
-    Event: "process",
-    SwitchExpr: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (interface{}, error) {
-        return m.(*Payment).Method, nil // Extract value to switch on
-    },
-    Cases: []statemachine.SwitchCase{
-        {Value: "credit_card", Transition: statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "PROCESSING_CARD"}},
-        {Value: "paypal", Transition: statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "PROCESSING_PAYPAL"}},
-        {Value: "bank_transfer", Transition: statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "AWAITING_TRANSFER"}},
-    },
-    DefaultTransition: &statemachine.Transition{Src: []statemachine.State{"PENDING"}, Dst: "UNSUPPORTED"},
-})
-```
-
-Cases are evaluated in order; first match executes. `DefaultTransition` executes if no case matches.
-
-**Priority**: Switch blocks > Condition blocks > Regular transitions
-
-### Parallel transitions
-
-Trigger multiple transitions concurrently:
-
-```go
-events := []statemachine.TransitionEvent{event1, event2, event3}
-model, err := sm.TriggerParallelTransitions(ctx, events, model)
-// Returns first successful result or first error
+go run ./examples/basic
+go run ./examples/order
+go run ./examples/flowchart
 ```
 
 ---
 
-## Error handling
+## API Reference
 
-The library uses **sentinel errors** so you can branch with `errors.Is`:
+### `Define()` — Builder
 
-| Error | When |
-|-------|------|
-| `ErrNilModel` | `TriggerTransition` was called with a nil model. |
-| `ErrUndefinedTransition` | No transition defined for the model’s current state and the given event. |
-| `ErrUninitializedSM` | `AddTransition` / `AddTransitions` on an uninitialized machine (internal). |
-| `ErrDuplicateTransition` | A transition for the same (source state, event) was already added. |
-| `ErrIgnore` | Special: return this from `OnFailure` to swallow the error and abort the transition without changing state. |
+| Method | Returns | Description |
+|---|---|---|
+| `Define()` | `*Builder` | Start a new Workflow definition |
+| `From(states...)` | `*FromBuilder` | Begin a transition from one or more states |
+| `OnEnter(state, activities...)` | `*Builder` | Sequential OnEnter Activities |
+| `OnEnterParallel(state, activities...)` | `*Builder` | Concurrent OnEnter Activities |
+| `OnExit(state, activities...)` | `*Builder` | Sequential OnExit Activities |
+| `OnExitParallel(state, activities...)` | `*Builder` | Concurrent OnExit Activities |
+| `WithLogger(Logger)` | `*Builder` | Set the transition logger |
+| `Build()` | `(*Workflow, error)` | Compile; returns error on duplicate transitions |
+| `MustBuild()` | `*Workflow` | Like Build but panics on error |
 
-Example:
+### `FromBuilder` / `OnBuilder`
 
-```go
-_, err := sm.TriggerTransition(ctx, ev, model)
-if err != nil {
-	if errors.Is(err, statemachine.ErrUndefinedTransition) {
-		// No transition for this state + event
-		return
-	}
-	if errors.Is(err, statemachine.ErrNilModel) {
-		// Model was nil
-		return
-	}
-	return err
-}
-```
+| Method | Returns | Description |
+|---|---|---|
+| `On(signal)` | `*OnBuilder` | Specify the Signal name |
+| `To(dst)` | `*SimpleRouteBuilder` | Simple routing — always goes to dst |
+| `If(Condition)` | `*IfBuilder` | Start an if-else chain |
+| `Switch(SwitchExpr)` | `*SwitchBuilder` | Start a switch-case chain |
 
----
+### `SimpleRouteBuilder`
 
-## Configuration
+| Method | Returns | Description |
+|---|---|---|
+| `Activity(fns...)` | `*SimpleRouteBuilder` | Attach transition Activities (chainable) |
+| `From / OnEnter / OnExit / … / Build` | — | Finalise and continue or compile |
 
-### Custom or no-op logger
+### `IfBuilder` / `BranchBuilder`
 
-By default, each transition is logged with the standard `log` package. To disable logging or use your own:
+| Method | Returns | Description |
+|---|---|---|
+| `To(dst)` | `*BranchBuilder` | Set destination for current Condition |
+| `ElseIf(Condition)` | `*IfBuilder` | Add another Condition branch |
+| `Else(dst)` | `*Builder` | Set fallback destination; finalises chain |
 
-```go
-// No logging
-sm := statemachine.NewStatemachineWithOptions(statemachine.EventKey{Src: "A", Event: "e"},
-	statemachine.WithLogger(statemachine.NoopLogger{}),
-)
+### `SwitchBuilder`
 
-// Custom logger (e.g. structured logging)
-sm := statemachine.NewStatemachineWithOptions(statemachine.EventKey{Src: "A", Event: "e"},
-	statemachine.WithLogger(myLogger),
-)
-```
+| Method | Returns | Description |
+|---|---|---|
+| `Case(value, dst)` | `*SwitchBuilder` | Add a case; chainable |
+| `Default(dst)` | `*Builder` | Set fallback destination; finalises chain |
 
-Your type must implement:
+### `Workflow`
 
-```go
-type Logger interface {
-	LogTransition(tr Transition)
-}
-```
+| Method | Description |
+|---|---|
+| `Signal(ctx, state, signal, payload)` | Stateless: resolve + run Activities; return new state |
+| `NewExecution(initialState)` | Create a stateful Execution |
+| `AvailableSignals(state)` | Sorted list of signals valid from state |
+| `States()` | Sorted list of all states with outgoing transitions |
+| `Visualize()` | Human-readable diagram |
 
-### Visualizing the state machine
+### `Execution`
 
-Call `Visualize` to print a text diagram of all transitions to stdout:
-
-```go
-statemachine.Visualize(sm)
-```
-
-Safe to call with a nil or empty machine (it prints a message and returns).
-
----
-
-## API overview
-
-| Symbol | Description |
-|--------|-------------|
-| `NewStatemachine(startEvent EventKey) StateMachine` | Build a new state machine with default options. |
-| `NewStatemachineWithOptions(startEvent EventKey, opts ...Option) StateMachine` | Build with options (e.g. `WithLogger`). |
-| `AddTransition(Transition) error` | Register one transition (may have multiple source states). |
-| `AddTransitions(...Transition) error` | Register multiple transitions. |
-| `TriggerTransition(ctx, event, model) (TransitionModel, error)` | Run the transition for the model’s current state and the given event. Returns the (possibly updated) model or an error. |
-| `GetTransitions() (EventKey, map[EventKey]Transition)` | Returns the initial event key and a **copy** of the transition map. |
-| `Visualize(StateMachine)` | Print a text diagram of the machine. |
-
-Interfaces:
-
-- **TransitionModel** — `GetState() State`, `SetState(State)`
-- **TransitionEvent** — `GetEvent() Event`
-
----
-
-## Testing
-
-Run tests:
-
-```bash
-go test ./statemachine/...
-```
-
-Tests cover: valid and invalid transitions, nil model, undefined transition, `ErrIgnore` abort behavior, handler return values, `GetTransitions` copy semantics, and `Visualize` with nil/empty machine.
+| Method | Description |
+|---|---|
+| `Signal(ctx, signal, payload)` | Drive to next state; updates internal state |
+| `CurrentState()` | Query the current state |
+| `CanReceive(signal)` | True if signal is valid from current state |
+| `SetState(state)` | Override state (no Activities run) |
 
 ---
 
 ## License
 
-This project is licensed under the MIT License—see [LICENSE](LICENSE) for details.
-
----
-
-[![BuyMeACoffee](https://bmc-cdn.nyc3.digitaloceanspaces.com/BMC-button-images/custom_images/orange_img.png)](https://www.buymeacoffee.com/imadarsh)
+[MIT](LICENSE) © 2019-2026 Adarsh Kumar

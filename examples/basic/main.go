@@ -1,49 +1,38 @@
-// Basic example: minimal state machine with a single transition and no hooks.
-//
-// Run with: go run ./examples/basic/main.go
+// Package main shows the minimal go-statemachine usage:
+// define a Workflow, start an Execution, send Signals.
 package main
 
 import (
 	"context"
 	"fmt"
+	"log"
 
-	"github.com/im-adarsh/go-statemachine/statemachine"
+	"github.com/im-adarsh/go-statemachine/workflow"
 )
 
-// Order is our transition model: it holds the current status as state.
-type Order struct {
-	ID     string
-	Status string
-}
-
-func (o *Order) SetState(s statemachine.State) { o.Status = string(s) }
-func (o *Order) GetState() statemachine.State   { return statemachine.State(o.Status) }
-
-// SubmitEvent triggers the DRAFT -> PENDING transition.
-type SubmitEvent struct{}
-
-func (SubmitEvent) GetEvent() statemachine.Event { return "submit" }
-
 func main() {
-	// 1. Create machine with an initial “entry” event key (for reference; e.g. first transition).
-	sm := statemachine.NewStatemachine(statemachine.EventKey{Src: "DRAFT", Event: "submit"})
-
-	// 2. Define the only transition: from DRAFT, on "submit", go to PENDING.
-	_ = sm.AddTransition(statemachine.Transition{
-		Src: []statemachine.State{"DRAFT"},
-		Event: "submit",
-		Dst:  "PENDING",
-	})
-
-	order := &Order{ID: "ord-1", Status: "DRAFT"}
-	ctx := context.Background()
-
-	// 3. Trigger the transition.
-	_, err := sm.TriggerTransition(ctx, SubmitEvent{}, order)
+	// Define the Workflow — build once, reuse across many Executions.
+	workflow, err := workflow.Define().
+		From("SOLID").On("melt").To("LIQUID").
+		From("LIQUID").On("vaporize").To("GAS").
+		From("GAS").On("condense").To("LIQUID").
+		From("LIQUID").On("freeze").To("SOLID").
+		WithLogger(workflow.DefaultLogger{}).
+		Build()
 	if err != nil {
-		fmt.Println("error:", err)
-		return
+		log.Fatal(err)
 	}
 
-	fmt.Println("order status:", order.Status) // PENDING
+	fmt.Println(workflow.Visualize())
+
+	// Start a new Execution at "SOLID".
+	exec := workflow.NewExecution("SOLID")
+
+	ctx := context.Background()
+	for _, signal := range []string{"melt", "vaporize", "condense", "freeze"} {
+		if err := exec.Signal(ctx, signal, nil); err != nil {
+			log.Fatalf("signal %q failed: %v", signal, err)
+		}
+		fmt.Printf("  → %s\n", exec.CurrentState())
+	}
 }
