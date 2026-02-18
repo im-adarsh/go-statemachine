@@ -1,11 +1,11 @@
 # go-statemachine
 
-A lightweight, stateless, type-safe state machine for Go — modelled after [Temporal](https://temporal.io/)'s core concepts but with **zero infrastructure**. Define a `Workflow` once, run unlimited `Execution`s anywhere.
+A lightweight, stateless, type-safe state machine for Go — modelled after [Temporal](https://temporal.io/)'s core concepts but with **zero infrastructure**. Define a `Workflow` once, run unlimited `Executions` anywhere.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/im-adarsh/go-statemachine/workflow.svg)](https://pkg.go.dev/github.com/im-adarsh/go-statemachine/workflow)
-[![Go Report Card](https://goreportcard.com/badge/github.com/im-adarsh/go-statemachine)](https://goreportcard.com/report/github.com/im-adarsh/go-statemachine)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-microsite-58a6ff?logo=github)](https://im-adarsh.github.io/go-statemachine)
+[Go Reference](https://pkg.go.dev/github.com/im-adarsh/go-statemachine/workflow)
+[Go Report Card](https://goreportcard.com/report/github.com/im-adarsh/go-statemachine)
+[License: MIT](LICENSE)
+[Docs](https://im-adarsh.github.io/go-statemachine)
 
 **[📖 Read the full documentation & ShopFlow walkthrough →](https://im-adarsh.github.io/go-statemachine)**
 
@@ -13,19 +13,21 @@ A lightweight, stateless, type-safe state machine for Go — modelled after [Tem
 
 ## Why go-statemachine?
 
-| Feature | go-statemachine | bare `switch` | full Temporal |
-|---|---|---|---|
-| Type-safe payload | ✅ generics | ❌ | ✅ |
-| Fluent builder API | ✅ | ❌ | ❌ |
-| Conditional / Switch routing | ✅ | manual | ✅ |
-| Saga compensation | ✅ | ❌ | ✅ |
-| Activity retry + timeout | ✅ | ❌ | ✅ |
-| Middleware / interceptors | ✅ | ❌ | ✅ |
-| Parallel state hooks | ✅ | ❌ | ✅ |
-| Execution history | ✅ | ❌ | ✅ |
-| Await (condition blocking) | ✅ | ❌ | ✅ |
-| Execution cancellation | ✅ | ❌ | ✅ |
-| Infrastructure required | ❌ none | ❌ none | ✅ server |
+
+| Feature                      | go-statemachine | bare `switch` | full Temporal |
+| ---------------------------- | --------------- | ------------- | ------------- |
+| Type-safe payload            | ✅ generics      | ❌             | ✅             |
+| Fluent builder API           | ✅               | ❌             | ❌             |
+| Conditional / Switch routing | ✅               | manual        | ✅             |
+| Saga compensation            | ✅               | ❌             | ✅             |
+| Activity retry + timeout     | ✅               | ❌             | ✅             |
+| Middleware / interceptors    | ✅               | ❌             | ✅             |
+| Parallel state hooks         | ✅               | ❌             | ✅             |
+| Execution history            | ✅               | ❌             | ✅             |
+| Await (condition blocking)   | ✅               | ❌             | ✅             |
+| Execution cancellation       | ✅               | ❌             | ✅             |
+| Infrastructure required      | ❌ none          | ❌ none        | ✅ server      |
+
 
 ---
 
@@ -41,15 +43,17 @@ Requires **Go 1.21+** (generics).
 
 ## Core Concepts (Temporal-inspired)
 
-| go-statemachine | Temporal equivalent | Description |
-|---|---|---|
-| `Workflow[T]` | Workflow Definition | Immutable state graph; share across goroutines |
-| `Execution[T]` | Workflow Execution | Stateful instance for one entity |
-| `Signal` | Signal | Named event that drives a transition |
-| `Activity[T]` | Activity Function | Unit of work; used for transitions and hooks |
-| `Condition[T]` | — | Predicate for if-else routing |
-| `SwitchExpr[T]` | — | Expression for switch-case routing |
-| `Middleware[T]` | Activity Interceptor | Wraps activities for cross-cutting concerns |
+
+| go-statemachine | Temporal equivalent  | Description                                    |
+| --------------- | -------------------- | ---------------------------------------------- |
+| `Workflow[T]`   | Workflow Definition  | Immutable state graph; share across goroutines |
+| `Execution[T]`  | Workflow Execution   | Stateful instance for one entity               |
+| `Signal`        | Signal               | Named event that drives a transition           |
+| `Activity[T]`   | Activity Function    | Unit of work; used for transitions and hooks   |
+| `Condition[T]`  | —                    | Predicate for if-else routing                  |
+| `SwitchExpr[T]` | —                    | Expression for switch-case routing             |
+| `Middleware[T]` | Activity Interceptor | Wraps activities for cross-cutting concerns    |
+
 
 ---
 
@@ -328,83 +332,99 @@ Entry point for the fluent builder.
 
 ### Builder methods
 
-| Method | Description |
-|---|---|
-| `From(states...)` | Starts a transition definition |
-| `OnEnter(state, activities...)` | Sequential on-enter hooks |
-| `OnEnterConcurrent(state, activities...)` | Parallel on-enter hooks |
-| `OnExit(state, activities...)` | Sequential on-exit hooks |
-| `OnExitConcurrent(state, activities...)` | Parallel on-exit hooks |
-| `WithLogger(Logger)` | Set custom logger |
-| `WithMiddleware(mw...)` | Workflow-wide activity middleware |
-| `Build()` | Compile; returns `(*Workflow[T], error)` |
-| `MustBuild()` | Compile; panics on error |
+
+| Method                                    | Description                              |
+| ----------------------------------------- | ---------------------------------------- |
+| `From(states...)`                         | Starts a transition definition           |
+| `OnEnter(state, activities...)`           | Sequential on-enter hooks                |
+| `OnEnterConcurrent(state, activities...)` | Parallel on-enter hooks                  |
+| `OnExit(state, activities...)`            | Sequential on-exit hooks                 |
+| `OnExitConcurrent(state, activities...)`  | Parallel on-exit hooks                   |
+| `WithLogger(Logger)`                      | Set custom logger                        |
+| `WithMiddleware(mw...)`                   | Workflow-wide activity middleware        |
+| `Build()`                                 | Compile; returns `(*Workflow[T], error)` |
+| `MustBuild()`                             | Compile; panics on error                 |
+
 
 ### Route builder methods (chained after `From(...).On(...)`)
 
-| Method | Description |
-|---|---|
-| `.To(dst)` | Simple unconditional route → `*SimpleRouteBuilder` |
-| `.If(cond, dst)` | Conditional route → `*IfBuilder` |
-| `.Switch(expr)` | Switch route → `*SwitchBuilder` |
+
+| Method           | Description                                        |
+| ---------------- | -------------------------------------------------- |
+| `.To(dst)`       | Simple unconditional route → `*SimpleRouteBuilder` |
+| `.If(cond, dst)` | Conditional route → `*IfBuilder`                   |
+| `.Switch(expr)`  | Switch route → `*SwitchBuilder`                    |
+
 
 ### `*SimpleRouteBuilder` methods
 
-| Method | Description |
-|---|---|
-| `.Activity(fns...)` | Register transition activities |
+
+| Method                        | Description                            |
+| ----------------------------- | -------------------------------------- |
+| `.Activity(fns...)`           | Register transition activities         |
 | `.Saga(activity, compensate)` | Register a Saga step with compensation |
+
 
 ### `Workflow[T]` methods
 
-| Method | Description |
-|---|---|
-| `Signal(ctx, state, signal, payload)` | Stateless transition; returns new state |
-| `NewExecution(ctx, initialState, opts...)` | Create a stateful Execution |
-| `AvailableSignals(state)` | Signals accepted in state |
-| `States()` | All states with outgoing transitions |
-| `Visualize()` | Text diagram |
+
+| Method                                     | Description                             |
+| ------------------------------------------ | --------------------------------------- |
+| `Signal(ctx, state, signal, payload)`      | Stateless transition; returns new state |
+| `NewExecution(ctx, initialState, opts...)` | Create a stateful Execution             |
+| `AvailableSignals(state)`                  | Signals accepted in state               |
+| `States()`                                 | All states with outgoing transitions    |
+| `Visualize()`                              | Text diagram                            |
+
 
 ### `Execution[T]` methods
 
-| Method | Description |
-|---|---|
-| `Signal(ctx, signal, payload)` | Drive transition; thread-safe |
-| `CurrentState()` | Current state |
-| `CanReceive(signal)` | Signal accepted in current state? |
-| `SetState(state)` | Forcibly set state (no hooks/activities) |
-| `AvailableSignals()` | Signals accepted now |
-| `History()` | Snapshot of all recorded transitions |
-| `Cancel()` | Cancel the Execution |
-| `Done()` | Channel closed on Cancel |
-| `Await(ctx, func(state string) bool)` | Block until condition or cancellation |
+
+| Method                                | Description                              |
+| ------------------------------------- | ---------------------------------------- |
+| `Signal(ctx, signal, payload)`        | Drive transition; thread-safe            |
+| `CurrentState()`                      | Current state                            |
+| `CanReceive(signal)`                  | Signal accepted in current state?        |
+| `SetState(state)`                     | Forcibly set state (no hooks/activities) |
+| `AvailableSignals()`                  | Signals accepted now                     |
+| `History()`                           | Snapshot of all recorded transitions     |
+| `Cancel()`                            | Cancel the Execution                     |
+| `Done()`                              | Channel closed on Cancel                 |
+| `Await(ctx, func(state string) bool)` | Block until condition or cancellation    |
+
 
 ### Activity wrappers
 
-| Function | Description |
-|---|---|
-| `Retry(fn, RetryPolicy)` | Exponential-backoff retry |
-| `Timeout(fn, duration)` | Per-call deadline |
+
+| Function                    | Description                            |
+| --------------------------- | -------------------------------------- |
+| `Retry(fn, RetryPolicy)`    | Exponential-backoff retry              |
+| `Timeout(fn, duration)`     | Per-call deadline                      |
 | `WithMiddleware(fn, mw...)` | Compose middleware around one activity |
+
 
 ### Errors
 
-| Sentinel | Meaning |
-|---|---|
-| `ErrUnknownSignal` | No transition registered for signal in current state |
-| `ErrNoConditionMatched` | Conditional route had no matching branch |
-| `ErrRetryExhausted` | All retry attempts failed |
-| `ErrExecutionCancelled` | Execution was cancelled |
+
+| Sentinel                | Meaning                                              |
+| ----------------------- | ---------------------------------------------------- |
+| `ErrUnknownSignal`      | No transition registered for signal in current state |
+| `ErrNoConditionMatched` | Conditional route had no matching branch             |
+| `ErrRetryExhausted`     | All retry attempts failed                            |
+| `ErrExecutionCancelled` | Execution was cancelled                              |
+
 
 ---
 
 ## Examples
 
-| Example | What it shows |
-|---|---|
-| [`examples/basic`](examples/basic/main.go) | Traffic light, history |
-| [`examples/order`](examples/order/main.go) | Saga, retry, timeout, Await, conditional routing |
-| [`examples/flowchart`](examples/flowchart/main.go) | Concurrent executions, parallel hooks, middleware |
+
+| Example                                            | What it shows                                     |
+| -------------------------------------------------- | ------------------------------------------------- |
+| `[examples/basic](examples/basic/main.go)`         | Traffic light, history                            |
+| `[examples/order](examples/order/main.go)`         | Saga, retry, timeout, Await, conditional routing  |
+| `[examples/flowchart](examples/flowchart/main.go)` | Concurrent executions, parallel hooks, middleware |
+
 
 ---
 
