@@ -20,16 +20,18 @@ func Visualize(sm StateMachine) {
 	}
 
 	srcToDstsMap := map[State][]EventKey{}
-	for _, v := range trs {
-		for _, src := range v.Src {
-			if _, ok := srcToDstsMap[src]; !ok {
-				srcToDstsMap[src] = []EventKey{}
-			}
+	for _, transitions := range trs {
+		for _, v := range transitions {
+			for _, src := range v.Src {
+				if _, ok := srcToDstsMap[src]; !ok {
+					srcToDstsMap[src] = []EventKey{}
+				}
 
-			srcToDstsMap[src] = append(srcToDstsMap[src], EventKey{
-				Src:   v.Dst,
-				Event: v.Event,
-			})
+				srcToDstsMap[src] = append(srcToDstsMap[src], EventKey{
+					Src:   v.Dst,
+					Event: v.Event,
+				})
+			}
 		}
 	}
 

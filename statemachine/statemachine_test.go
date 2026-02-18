@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -49,7 +50,7 @@ type testEvent string
 
 func (e testEvent) GetEvent() Event { return Event(e) }
 
-func getTestData() (EventKey, map[EventKey]Transition) {
+func getTestData() (EventKey, map[EventKey][]Transition) {
 	sm := NewStatemachine(EventKey{Src: "SOLID", Event: "onMelt"})
 	sm.AddTransition(Transition{
 		Src:        []State{"SOLID"},
@@ -172,7 +173,7 @@ func Test_stateMachine_TriggerTransition(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &stateMachine{startEvent: ek, transitions: trs, logger: nil}
+			s := &stateMachine{startEvent: ek, transitions: trs, stateEntries: make(map[State][]stateEntryHandlerWithConcurrency), stateExits: make(map[State][]stateExitHandlerWithConcurrency), logger: nil}
 			_, err := s.TriggerTransition(tt.ctx, tt.e, tt.model)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TriggerTransition() error = %v, wantErr %v", err, tt.wantErr)
@@ -293,6 +294,101 @@ func TestGetTransitions_ReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestConditionalFlow_MultipleTransitions(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "START", Event: "process"})
+	
+	// Add multiple transitions with guards (conditional flow)
+	sm.AddTransition(Transition{
+		Src: []State{"START"}, Event: "process", Dst: "HIGH",
+		Guard: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+			return m.(*TestStruct).Id == "high", nil
+		},
+	})
+	sm.AddTransition(Transition{
+		Src: []State{"START"}, Event: "process", Dst: "MEDIUM",
+		Guard: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+			return m.(*TestStruct).Id == "medium", nil
+		},
+	})
+	sm.AddTransition(Transition{
+		Src: []State{"START"}, Event: "process", Dst: "LOW",
+		// No guard = default/fallback
+	})
+
+	// Test HIGH path
+	model1 := &TestStruct{Id: "high", Status: "START"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("process"), model1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model1.GetState() != "HIGH" {
+		t.Errorf("expected HIGH, got %v", model1.GetState())
+	}
+
+	// Test MEDIUM path
+	model2 := &TestStruct{Id: "medium", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("process"), model2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model2.GetState() != "MEDIUM" {
+		t.Errorf("expected MEDIUM, got %v", model2.GetState())
+	}
+
+	// Test LOW path (fallback)
+	model3 := &TestStruct{Id: "other", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("process"), model3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model3.GetState() != "LOW" {
+		t.Errorf("expected LOW, got %v", model3.GetState())
+	}
+}
+
+func TestConcurrentStateHandlers(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	sm.AddTransition(Transition{Src: []State{"A"}, Event: "e", Dst: "B"})
+
+	var callOrder []string
+	var mu sync.Mutex
+
+	sm.AddStateEntry("B", func(ctx context.Context, m TransitionModel) error {
+		mu.Lock()
+		callOrder = append(callOrder, "seq1")
+		mu.Unlock()
+		return nil
+	})
+
+	sm.AddStateEntryConcurrent("B", func(ctx context.Context, m TransitionModel) error {
+		mu.Lock()
+		callOrder = append(callOrder, "concurrent1")
+		mu.Unlock()
+		return nil
+	})
+
+	sm.AddStateEntryConcurrent("B", func(ctx context.Context, m TransitionModel) error {
+		mu.Lock()
+		callOrder = append(callOrder, "concurrent2")
+		mu.Unlock()
+		return nil
+	})
+
+	model := &TestStruct{Status: "A"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Sequential handler should run first
+	if len(callOrder) < 3 {
+		t.Errorf("expected at least 3 handlers, got %d", len(callOrder))
+	}
+	if callOrder[0] != "seq1" {
+		t.Errorf("expected seq1 first, got %s", callOrder[0])
+	}
+}
+
 func TestVisualize_NilAndEmpty(t *testing.T) {
 	// Should not panic
 	Visualize(nil)
@@ -316,3 +412,271 @@ func TestNewStatemachineWithOptions_WithLogger(t *testing.T) {
 type LoggerFunc func(Transition)
 
 func (f LoggerFunc) LogTransition(tr Transition) { f(tr) }
+
+func TestGuardCondition_BlocksTransition(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	sm.AddTransition(Transition{
+		Src: []State{"A"}, Event: "e", Dst: "B",
+		Guard: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+			// Only allow if status contains "allow"
+			return m.GetState() == "A" && m.(*TestStruct).Id == "allow", nil
+		},
+	})
+
+	// Guard fails
+	model1 := &TestStruct{Id: "deny", Status: "A"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model1)
+	if err == nil {
+		t.Fatal("expected error when guard fails")
+	}
+	if !errors.Is(err, ErrGuardFailed) {
+		t.Errorf("expected ErrGuardFailed, got %v", err)
+	}
+	if model1.GetState() != "A" {
+		t.Errorf("state should be unchanged, got %v", model1.GetState())
+	}
+
+	// Guard passes
+	model2 := &TestStruct{Id: "allow", Status: "A"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("e"), model2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model2.GetState() != "B" {
+		t.Errorf("expected state B, got %v", model2.GetState())
+	}
+}
+
+func TestGuardCondition_WithOnFailure(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	// Add a fallback transition without guard so OnFailure can be called
+	sm.AddTransition(Transition{
+		Src: []State{"A"}, Event: "e", Dst: "B",
+		Guard: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+			return false, nil // Guard fails
+		},
+		OnFailure: func(ctx context.Context, m TransitionModel, code Error, err error) (TransitionModel, error) {
+			return m, ErrIgnore // Swallow error
+		},
+	})
+	// Add fallback transition
+	sm.AddTransition(Transition{
+		Src: []State{"A"}, Event: "e", Dst: "FALLBACK",
+	})
+
+	model := &TestStruct{Status: "A"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model)
+	// With conditional flow, the fallback transition will match, so we won't hit OnFailure
+	// But the guard still works - first transition guard fails, so fallback is used
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model.GetState() != "FALLBACK" {
+		t.Errorf("expected FALLBACK (fallback transition), got %v", model.GetState())
+	}
+}
+
+func TestStateEntryExit_Callbacks(t *testing.T) {
+	var entryCalled, exitCalled bool
+	var entryState, exitState State
+
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	sm.AddTransition(Transition{Src: []State{"A"}, Event: "e", Dst: "B"})
+
+	sm.AddStateExit("A", func(ctx context.Context, m TransitionModel) error {
+		exitCalled = true
+		exitState = m.GetState()
+		return nil
+	})
+
+	sm.AddStateEntry("B", func(ctx context.Context, m TransitionModel) error {
+		entryCalled = true
+		entryState = m.GetState()
+		return nil
+	})
+
+	model := &TestStruct{Status: "A"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !exitCalled {
+		t.Error("state exit handler should have been called")
+	}
+	if exitState != "A" {
+		t.Errorf("exit handler should see state A, got %v", exitState)
+	}
+
+	if !entryCalled {
+		t.Error("state entry handler should have been called")
+	}
+	if entryState != "B" {
+		t.Errorf("entry handler should see state B, got %v", entryState)
+	}
+}
+
+func TestStateEntryExit_ErrorAbortsTransition(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	sm.AddTransition(Transition{Src: []State{"A"}, Event: "e", Dst: "B"})
+
+	sm.AddStateExit("A", func(ctx context.Context, m TransitionModel) error {
+		return errors.New("exit failed")
+	})
+
+	model := &TestStruct{Status: "A"}
+	_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model)
+	if err == nil {
+		t.Fatal("expected error from exit handler")
+	}
+	// State should not change if exit handler fails
+	if model.GetState() != "A" {
+		t.Errorf("state should remain A after exit failure, got %v", model.GetState())
+	}
+}
+
+func TestConcurrentAccess_ThreadSafe(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+	sm.AddTransition(Transition{Src: []State{"A"}, Event: "e", Dst: "B"})
+	sm.AddTransition(Transition{Src: []State{"B"}, Event: "e2", Dst: "A"})
+
+	const goroutines = 10
+	const iterations = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				model := &TestStruct{Status: "A"}
+				_, err := sm.TriggerTransition(context.Background(), testEvent("e"), model)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+					return
+				}
+				if model.GetState() != "B" {
+					t.Errorf("expected state B, got %v", model.GetState())
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestConcurrentAddTransition_ThreadSafe(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "A", Event: "e"})
+
+	const goroutines = 5
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			err := sm.AddTransition(Transition{
+				Src: []State{State(fmt.Sprintf("S%d", id))}, Event: "e", Dst: "D",
+			})
+			if err != nil && !errors.Is(err, ErrDuplicateTransition) {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestConditionBlock_IfElse(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "START", Event: "process"})
+
+	err := sm.AddConditionBlock(ConditionBlock{
+		Src:   []State{"START"},
+		Event: "process",
+		Cases: []ConditionCase{
+			{
+				Condition: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+					return m.(*TestStruct).Id == "high", nil
+				},
+				Transition: Transition{Src: []State{"START"}, Dst: "HIGH"},
+			},
+			{
+				Condition: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (bool, error) {
+					return m.(*TestStruct).Id == "medium", nil
+				},
+				Transition: Transition{Src: []State{"START"}, Dst: "MEDIUM"},
+			},
+		},
+		ElseTransition: &Transition{Src: []State{"START"}, Dst: "LOW"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	model1 := &TestStruct{Id: "high", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("process"), model1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model1.GetState() != "HIGH" {
+		t.Errorf("expected HIGH, got %v", model1.GetState())
+	}
+
+	model2 := &TestStruct{Id: "medium", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("process"), model2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model2.GetState() != "MEDIUM" {
+		t.Errorf("expected MEDIUM, got %v", model2.GetState())
+	}
+
+	model3 := &TestStruct{Id: "low", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("process"), model3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model3.GetState() != "LOW" {
+		t.Errorf("expected LOW, got %v", model3.GetState())
+	}
+}
+
+func TestSwitchBlock_SwitchCase(t *testing.T) {
+	sm := NewStatemachine(EventKey{Src: "START", Event: "route"})
+
+	err := sm.AddSwitchBlock(SwitchBlock{
+		Src:   []State{"START"},
+		Event: "route",
+		SwitchExpr: func(ctx context.Context, _ TransitionEvent, m TransitionModel) (interface{}, error) {
+			return m.(*TestStruct).Id, nil
+		},
+		Cases: []SwitchCase{
+			{Value: "A", Transition: Transition{Src: []State{"START"}, Dst: "STATE_A"}},
+			{Value: "B", Transition: Transition{Src: []State{"START"}, Dst: "STATE_B"}},
+			{Value: "C", Transition: Transition{Src: []State{"START"}, Dst: "STATE_C"}},
+		},
+		DefaultTransition: &Transition{Src: []State{"START"}, Dst: "DEFAULT"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	model1 := &TestStruct{Id: "A", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("route"), model1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model1.GetState() != "STATE_A" {
+		t.Errorf("expected STATE_A, got %v", model1.GetState())
+	}
+
+	model2 := &TestStruct{Id: "X", Status: "START"}
+	_, err = sm.TriggerTransition(context.Background(), testEvent("route"), model2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if model2.GetState() != "DEFAULT" {
+		t.Errorf("expected DEFAULT, got %v", model2.GetState())
+	}
+}
