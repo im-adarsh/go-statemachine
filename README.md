@@ -1,21 +1,50 @@
 # go-statemachine
 
-A small, focused **finite state machine** library for Go with configurable transitions and lifecycle hooks. Suitable for order workflows, approval flows, or any state-driven behavior.
+A minimal, production-ready **finite state machine** library for Go. Define states, events, and transitions with optional lifecycle hooks—ideal for order workflows, approval flows, and any state-driven logic.
 
-**Inspired by:** [Tinder/StateMachine](https://github.com/Tinder/StateMachine)
+[![Go Reference](https://pkg.go.dev/badge/github.com/im-adarsh/go-statemachine.svg)](https://pkg.go.dev/github.com/im-adarsh/go-statemachine/statemachine)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![Image of Statemachine](static/activity-diagram.png)
+Inspired by [Tinder/StateMachine](https://github.com/Tinder/StateMachine).
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Concepts](#concepts)
+- [Quick start](#quick-start)
+- [Examples](#examples)
+- [Lifecycle hooks](#lifecycle-hooks)
+- [Error handling](#error-handling)
+- [Configuration](#configuration)
+- [API overview](#api-overview)
+- [Testing](#testing)
+- [License](#license)
+
+---
 
 ## Features
 
-- **Simple API**: Define transitions by source state(s), event, and destination state.
-- **Lifecycle hooks**: `BeforeTransition`, `Transition`, `AfterTransition`, `OnSuccess`, `OnFailure`.
-- **Handler return values**: Handlers can return an updated `TransitionModel`; the machine uses it for subsequent steps.
-- **Error handling**: Sentinel errors (`ErrNilModel`, `ErrUndefinedTransition`, etc.) so you can use `errors.Is(err, statemachine.ErrUndefinedTransition)`.
-- **ErrIgnore**: Return `statemachine.ErrIgnore` from `OnFailure` to swallow the error and abort the transition **without** changing state.
-- **Configurable logging**: Optional `Logger` and `WithLogger(statemachine.NoopLogger{})` to disable logs.
-- **Visualize**: Print a text diagram of the state machine for documentation or debugging.
-- **Go module**: `go get github.com/im-adarsh/go-statemachine/statemachine`
+| Feature | Description |
+|--------|-------------|
+| **Simple API** | Define transitions as (source state(s), event, destination state). No code generation. |
+| **Lifecycle hooks** | `BeforeTransition`, `Transition`, `AfterTransition`, `OnSuccess`, `OnFailure`—all optional. |
+| **Handler return values** | Handlers may return an updated model; the machine uses it for subsequent steps and as the final result. |
+| **Sentinel errors** | Use `errors.Is(err, statemachine.ErrUndefinedTransition)` and similar for robust error handling. |
+| **ErrIgnore** | Return `statemachine.ErrIgnore` from `OnFailure` to swallow the error and abort the transition **without** changing state. |
+| **Configurable logging** | Plug in a custom `Logger` or use `NoopLogger{}` to disable logs. |
+| **Visualize** | Print a text diagram of the state machine for docs or debugging. |
+
+---
+
+## Requirements
+
+- **Go 1.21+**
+
+---
 
 ## Installation
 
@@ -27,164 +56,192 @@ go get github.com/im-adarsh/go-statemachine/statemachine
 import "github.com/im-adarsh/go-statemachine/statemachine"
 ```
 
+---
+
+## Concepts
+
+- **State** — A value (e.g. `"PENDING"`, `"SHIPPED"`) held by your model.
+- **Event** — A trigger (e.g. `"Submit"`, `"Ship"`) supplied when firing a transition.
+- **Transition** — A rule: from one or more source states, on an event, move to a destination state. You can attach optional hooks to each transition.
+- **Model** — Your struct that implements `TransitionModel` (`GetState` / `SetState`). The machine reads and updates its state.
+- **Event key** — The pair `(SourceState, Event)` that uniquely identifies which transition to run.
+
+---
+
 ## Quick start
-
-```go
-sm := statemachine.NewStatemachine(statemachine.EventKey{Src: "SOLID", Event: "onMelt"})
-sm.AddTransition(statemachine.Transition{
-    Src: []statemachine.State{"SOLID"}, Event: "onMelt", Dst: "LIQUID",
-})
-model, err := sm.TriggerTransition(ctx, myEvent, myModel)
-if errors.Is(err, statemachine.ErrUndefinedTransition) {
-    // no transition for this state+event
-}
-```
-
-## Full example
 
 ```go
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/im-adarsh/go-statemachine/statemachine"
 )
 
-type Purchase struct {
-	PurchaseId string
-	Status     string
-}
+type Order struct{ Status string }
 
-func (p *Purchase) SetState(s statemachine.State) { p.Status = string(s) }
-func (p *Purchase) GetState() statemachine.State   { return statemachine.State(p.Status) }
-
-type onMelt struct{}
-func (onMelt) GetEvent() statemachine.Event { return "onMelt" }
-
-type onVapourise struct{}
-func (onVapourise) GetEvent() statemachine.Event { return "onVapourise" }
-
-type onUnknownEvent struct{}
-func (onUnknownEvent) GetEvent() statemachine.Event { return "onUnknownEvent" }
+func (o *Order) SetState(s statemachine.State) { o.Status = string(s) }
+func (o *Order) GetState() statemachine.State   { return statemachine.State(o.Status) }
 
 func main() {
-	sm := createStatemachine()
-	statemachine.Visualize(sm)
+	sm := statemachine.NewStatemachine(statemachine.EventKey{Src: "DRAFT", Event: "submit"})
+	sm.AddTransition(statemachine.Transition{
+		Src: []statemachine.State{"DRAFT"}, Event: "submit", Dst: "PENDING",
+	})
 
-	pr := &Purchase{PurchaseId: "p_123", Status: "SOLID"}
-
-	// SOLID -> LIQUID
-	if _, err := sm.TriggerTransition(context.Background(), &onMelt{}, pr); err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	fmt.Println("after onMelt:", pr.Status)
-
-	// LIQUID -> GAS
-	if _, err := sm.TriggerTransition(context.Background(), &onVapourise{}, pr); err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	fmt.Println("after onVapourise:", pr.Status)
-
-	// GAS -> (no transition for onUnknownEvent)
-	_, err := sm.TriggerTransition(context.Background(), &onUnknownEvent{}, pr)
+	order := &Order{Status: "DRAFT"}
+	_, err := sm.TriggerTransition(context.Background(), event("submit"), order)
 	if err != nil {
-		if errors.Is(err, statemachine.ErrUndefinedTransition) {
-			fmt.Println("expected: no transition defined for this event")
-		}
 		fmt.Println("error:", err)
 		return
 	}
-	fmt.Println("after onUnknownEvent:", pr.Status)
+	fmt.Println("status:", order.Status) // PENDING
 }
 
-func createStatemachine() statemachine.StateMachine {
-	sm := statemachine.NewStatemachine(statemachine.EventKey{Src: "SOLID", Event: "onMelt"})
-	sm.AddTransition(statemachine.Transition{
-		Src: []statemachine.State{"SOLID"}, Event: "onMelt", Dst: "LIQUID",
-		Transition: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (statemachine.TransitionModel, error) {
-			fmt.Println("during")
-			return nil, nil
-		},
-	})
-	sm.AddTransition(statemachine.Transition{
-		Src: []statemachine.State{"LIQUID"}, Event: "onVapourise", Dst: "GAS",
-		BeforeTransition: func(ctx context.Context, m statemachine.TransitionModel) (statemachine.TransitionModel, error) {
-			fmt.Println("before")
-			return nil, nil
-		},
-		Transition: func(ctx context.Context, _ statemachine.TransitionEvent, m statemachine.TransitionModel) (statemachine.TransitionModel, error) {
-			fmt.Println("during")
-			return nil, nil
-		},
-		AfterTransition: func(ctx context.Context, m statemachine.TransitionModel) (statemachine.TransitionModel, error) {
-			fmt.Println("after")
-			return nil, nil
-		},
-		OnSuccess: func(ctx context.Context, m statemachine.TransitionModel) (statemachine.TransitionModel, error) {
-			fmt.Println("success")
-			return nil, nil
-		},
-		OnFailure: func(ctx context.Context, m statemachine.TransitionModel, _ statemachine.Error, err error) (statemachine.TransitionModel, error) {
-			fmt.Println("failure")
-			return nil, err
-		},
-	})
-	// Add onCondensation (GAS->LIQUID) and onFreeze (LIQUID->SOLID) as needed...
-	return sm
+type event string
+func (e event) GetEvent() statemachine.Event { return statemachine.Event(e) }
+```
+
+---
+
+## Examples
+
+The [examples/](examples/) directory contains runnable programs. Run any of them with:
+
+```bash
+go run ./examples/<name>/main.go
+```
+
+| Example | Description |
+|--------|-------------|
+| [basic](examples/basic/main.go) | Minimal FSM: one transition, no hooks. |
+| [phase](examples/phase/main.go) | Phase diagram (SOLID ↔ LIQUID ↔ GAS) with before/during/after hooks and visualization. |
+| [error-handling](examples/error-handling/main.go) | Using `errors.Is` for undefined transitions and `ErrIgnore` to abort without changing state. |
+| [custom-logger](examples/custom-logger/main.go) | Disable or customize logging with `WithLogger`. |
+
+---
+
+## Lifecycle hooks
+
+For each transition you can attach optional handlers. Execution order:
+
+1. **BeforeTransition** — Runs before the state change. If it returns an error, the transition is aborted (unless `OnFailure` returns `ErrIgnore`).
+2. **Transition** — The main “during” logic. Same abort rules.
+3. **State update** — The model’s state is set to the destination state.
+4. **AfterTransition** — Runs after the state change. Errors are passed to `OnFailure` if set.
+5. **OnSuccess** — Called when the transition completed without error. Its return value is the final model returned to the caller.
+6. **OnFailure** — Called when any hook returns an error. If it returns `ErrIgnore`, the error is swallowed and the transition is aborted without changing state.
+
+Handlers that return a non-nil `TransitionModel` pass that model to the next step and as the final result.
+
+---
+
+## Error handling
+
+The library uses **sentinel errors** so you can branch with `errors.Is`:
+
+| Error | When |
+|-------|------|
+| `ErrNilModel` | `TriggerTransition` was called with a nil model. |
+| `ErrUndefinedTransition` | No transition defined for the model’s current state and the given event. |
+| `ErrUninitializedSM` | `AddTransition` / `AddTransitions` on an uninitialized machine (internal). |
+| `ErrDuplicateTransition` | A transition for the same (source state, event) was already added. |
+| `ErrIgnore` | Special: return this from `OnFailure` to swallow the error and abort the transition without changing state. |
+
+Example:
+
+```go
+_, err := sm.TriggerTransition(ctx, ev, model)
+if err != nil {
+	if errors.Is(err, statemachine.ErrUndefinedTransition) {
+		// No transition for this state + event
+		return
+	}
+	if errors.Is(err, statemachine.ErrNilModel) {
+		// Model was nil
+		return
+	}
+	return err
 }
 ```
 
-## Options
+---
 
-- **Custom logger** (e.g. structured logging or silence):
+## Configuration
+
+### Custom or no-op logger
+
+By default, each transition is logged with the standard `log` package. To disable logging or use your own:
 
 ```go
+// No logging
 sm := statemachine.NewStatemachineWithOptions(statemachine.EventKey{Src: "A", Event: "e"},
-    statemachine.WithLogger(statemachine.NoopLogger{}),
+	statemachine.WithLogger(statemachine.NoopLogger{}),
+)
+
+// Custom logger (e.g. structured logging)
+sm := statemachine.NewStatemachineWithOptions(statemachine.EventKey{Src: "A", Event: "e"},
+	statemachine.WithLogger(myLogger),
 )
 ```
 
-- **Sentinel errors** (use with `errors.Is`):
+Your type must implement:
 
-  - `statemachine.ErrNilModel` — model is nil  
-  - `statemachine.ErrUndefinedTransition` — no transition for current state + event  
-  - `statemachine.ErrUninitializedSM` — AddTransition on uninitialized machine  
-  - `statemachine.ErrDuplicateTransition` — transition already defined  
-  - `statemachine.ErrIgnore` — return this from `OnFailure` to abort transition and return success with unchanged model  
-
-## Output (example run)
-
+```go
+type Logger interface {
+	LogTransition(tr Transition)
+}
 ```
-######################################################
-| Node :  LIQUID |
-                  -- onVapourise --> | Node :  GAS |
-                  -- onFreeze --> | Node :  SOLID |
-| Node :  GAS |
-                  -- onCondensation --> | Node :  LIQUID |
-| Node :  SOLID |
-                  -- onMelt --> | Node :  LIQUID |
-######################################################
 
-during
-after onMelt: LIQUID
+### Visualizing the state machine
 
-before
-during
-after
-success
-after onVapourise: GAS
+Call `Visualize` to print a text diagram of all transitions to stdout:
 
-expected: no transition defined for this event
-error: transition is not defined
+```go
+statemachine.Visualize(sm)
 ```
+
+Safe to call with a nil or empty machine (it prints a message and returns).
+
+---
+
+## API overview
+
+| Symbol | Description |
+|--------|-------------|
+| `NewStatemachine(startEvent EventKey) StateMachine` | Build a new state machine with default options. |
+| `NewStatemachineWithOptions(startEvent EventKey, opts ...Option) StateMachine` | Build with options (e.g. `WithLogger`). |
+| `AddTransition(Transition) error` | Register one transition (may have multiple source states). |
+| `AddTransitions(...Transition) error` | Register multiple transitions. |
+| `TriggerTransition(ctx, event, model) (TransitionModel, error)` | Run the transition for the model’s current state and the given event. Returns the (possibly updated) model or an error. |
+| `GetTransitions() (EventKey, map[EventKey]Transition)` | Returns the initial event key and a **copy** of the transition map. |
+| `Visualize(StateMachine)` | Print a text diagram of the machine. |
+
+Interfaces:
+
+- **TransitionModel** — `GetState() State`, `SetState(State)`
+- **TransitionEvent** — `GetEvent() Event`
+
+---
+
+## Testing
+
+Run tests:
+
+```bash
+go test ./statemachine/...
+```
+
+Tests cover: valid and invalid transitions, nil model, undefined transition, `ErrIgnore` abort behavior, handler return values, `GetTransitions` copy semantics, and `Visualize` with nil/empty machine.
+
+---
 
 ## License
 
-See [LICENSE](LICENSE).
+This project is licensed under the MIT License—see [LICENSE](LICENSE) for details.
+
+---
 
 [![BuyMeACoffee](https://bmc-cdn.nyc3.digitaloceanspaces.com/BMC-button-images/custom_images/orange_img.png)](https://www.buymeacoffee.com/imadarsh)
