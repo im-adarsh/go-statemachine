@@ -5,6 +5,8 @@ import "fmt"
 const StartLineDivider = "\n\n######################################################"
 const EndLineDivider = "######################################################\n\n"
 
+// Visualize prints a text representation of the state machine's transitions to stdout.
+// Safe to call with nil or empty state machines (prints a message and returns).
 func Visualize(sm StateMachine) {
 	if sm == nil {
 		fmt.Println("cannot visualize uninitialized statemachine")
@@ -12,8 +14,9 @@ func Visualize(sm StateMachine) {
 	}
 
 	_, trs := sm.GetTransitions()
-	if trs == nil {
+	if trs == nil || len(trs) == 0 {
 		fmt.Println("cannot visualize empty transitions")
+		return
 	}
 
 	srcToDstsMap := map[State][]EventKey{}
@@ -32,9 +35,9 @@ func Visualize(sm StateMachine) {
 
 	fmt.Println(StartLineDivider)
 	for k, vs := range srcToDstsMap {
-		fmt.Println(fmt.Sprintf("| Node :  %v |", k))
+		fmt.Printf("| Node :  %v |\n", k)
 		for _, v := range vs {
-			fmt.Println(fmt.Sprintf("\t \t  -- %v --> | Node :  %v |", v.Event, v.Src))
+			fmt.Printf("\t \t  -- %v --> | Node :  %v |\n", v.Event, v.Src)
 		}
 	}
 	fmt.Print(EndLineDivider)
