@@ -5,6 +5,9 @@ A lightweight, stateless, type-safe state machine for Go — modelled after [Tem
 [![Go Reference](https://pkg.go.dev/badge/github.com/im-adarsh/go-statemachine/workflow.svg)](https://pkg.go.dev/github.com/im-adarsh/go-statemachine/workflow)
 [![Go Report Card](https://goreportcard.com/badge/github.com/im-adarsh/go-statemachine)](https://goreportcard.com/report/github.com/im-adarsh/go-statemachine)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-microsite-58a6ff?logo=github)](https://im-adarsh.github.io/go-statemachine)
+
+**[📖 Read the full documentation & ShopFlow walkthrough →](https://im-adarsh.github.io/go-statemachine)**
 
 ---
 
